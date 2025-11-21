@@ -62,7 +62,7 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="bg-white/95 backdrop-blur-xl border-b border-neutral-200 sticky top-0 z-50 shadow-sm">
+      <nav className="bg-white border-b border-neutral-200 sticky top-0 z-50 shadow-sm">
         <div className="w-full px-3 sm:px-4 md:px-6 lg:max-w-7xl lg:mx-auto">
           <div className="flex items-center justify-between h-16 md:h-[4.5rem]">
 
@@ -252,7 +252,7 @@ export default function Navbar() {
           />
 
 
-          <div className="absolute top-16 left-0 right-0 bg-white border-b border-neutral-200 shadow-xl animate-slide-down">
+          <div className="absolute top-16 left-0 right-0 bg-white backdrop-blur-none border-b border-neutral-200 shadow-xl animate-slide-down">
             <div className="px-4 py-6 space-y-2 max-h-[calc(100vh-4rem)] overflow-y-auto">
 
               {isAdmin ? (

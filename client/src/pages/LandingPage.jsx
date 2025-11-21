@@ -124,11 +124,11 @@ export default function LandingPage() {
       
 
 
-      <nav className={`fixed top-0 w-full z-50 transition-all duration-500 ${
-        hideNav ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
-      } ${
-        scrolled ? 'bg-white/95 backdrop-blur-xl border-b border-neutral-200 shadow-sm' : 'bg-transparent'
-      }`}>
+        <nav className={`fixed top-0 w-full z-50 transition-all duration-500 ${
+          hideNav ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
+        } ${
+          scrolled ? 'bg-white/95 backdrop-blur-xl border-b border-neutral-200 shadow-sm' : 'bg-white/98 backdrop-blur-md'
+        }`}>
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-6 md:gap-12">

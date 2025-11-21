@@ -41,7 +41,7 @@ venv.bak/
 .venv
 *.lnk
 
-.env
+client/src/assets/.env
 .env.local
 .env.*.local
 .env.development

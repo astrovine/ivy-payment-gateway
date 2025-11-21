@@ -24,7 +24,7 @@ services:
     volumes:
       - ./:/app
     env_file:
-      - ./.env
+      - .env
     environment:
       - DATABASE_HOST=db
       - DATABASE_PORT=5432
@@ -45,7 +45,7 @@ services:
     volumes:
       - ./:/app
     env_file:
-      - ./.env
+      - .env
     command: celery -A app.celery_worker.celery_app beat --loglevel=info
     depends_on:
       - redis
@@ -57,7 +57,7 @@ services:
     volumes:
       - ./:/app
     env_file:
-      - ./.env
+      - .env
     environment:
       - DATABASE_HOST=db
       - DATABASE_PORT=5432
