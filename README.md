@@ -21,7 +21,7 @@ Built with a double-entry ledger system, ACID-compliant transactions, and event-
 
 ## System Architecture
 The system implements an event-driven microservices architecture. It utilizes a high-performance asynchronous API for request handling, while offloading resource-intensive operations (ledger updates, settlements, and webhook delivery) to specialized worker queues.
-![Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png](../assets/Mermaid%20Chart%20-%20Create%20complex%2C%20visual%20diagrams%20with%20text.-2025-11-21-082807.png)
+![Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png](client/src/assets/Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png)
 ---
 
 
@@ -63,19 +63,19 @@ The system implements an event-driven microservices architecture. It utilizes a 
 
 ### 1. Merchant Dashboard
 Provides a real-time overview of pending versus available balances, recent transactions, and daily payment volume.
-![img_2.png](../assets/img_2.png)
+![img_2.png](client/src/assets/img_2.png)
 
 ### 2. API Key Management
 Allows merchants to securely generate, view, and revoke API keys for both Test and Live environments.
-![img_4.png](../assets/img_4.png)
+![img_4.png](client/src/assets/img_4.png)
 
 ### 3. Developer Documentation
 Interactive API documentation generated automatically by Swagger UI, allowing for easy testing and integration.
-![img_3.png](../assets/img_3.png)
+![img_3.png](client/src/assets/img_3.png)
 
 ## 4. Analytics & Reports
 A comprehensive page for visualizing transaction data and past trends
-![img_5.png](../assets/img_5.png)
+![img_5.png](client/src/assets/img_5.png)
 
 
 ## Repository Structure
