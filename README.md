@@ -21,7 +21,7 @@ Built with a double-entry ledger system, ACID-compliant transactions, and event-
 
 ## System Architecture
 The system implements an event-driven microservices architecture. It utilizes a high-performance asynchronous API for request handling, while offloading resource-intensive operations (ledger updates, settlements, and webhook delivery) to specialized worker queues.
-![Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png](client/src/assets/Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png)
+![Mermaid Chart - Create complex, visual diagrams with text.-2025-11-21-082807.png](client/src/assets/Mermaid%20Chart%20-%20Create%20complex%2C%20visual%20diagrams%20with%20text.-2025-11-21-082807.png)
 ---
 
 
