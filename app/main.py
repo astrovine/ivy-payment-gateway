@@ -41,13 +41,9 @@ app.add_middleware(
 )
 
 app.include_router(authentication.router)
-
 app.include_router(account.router)
-
 app.include_router(charges.router)
-
 app.include_router(merchant.router)
-
 app.include_router(api_keys.router)
 app.include_router(kyc.router)
 app.include_router(verification.router)

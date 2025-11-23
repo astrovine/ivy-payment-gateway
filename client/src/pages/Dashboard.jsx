@@ -10,7 +10,7 @@ const getTimeBasedGreeting = () => {
     morning: ["Good morning", "Rise and shine", "Top of the morning", "The sun is shinning and so are you","What a beautiful morning", "What are we upto today"],
     afternoon: ["Good afternoon", "What a wonderful afternoon", "Hope you're having a great day", "Welcome back", "Afternoon"],
     evening: ["Good evening", "Hope you had a productive day", "Great to see you", "Evening"],
-    night: ["Good evening", "Burning the midnight oil", "Working late", "Still here"]
+    night: ["Good evening", "Burning the midnight oil", "Working late", "Still here","Saving the city"]
   }
 
   let greetingArray
