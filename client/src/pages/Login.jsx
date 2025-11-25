@@ -55,14 +55,12 @@ export default function Login() {
   }
 
   const handleGoogleLogin = () => {
-    window.location.href = "http://localhost:8000/api/v1/auth/google/login";
+    window.location.href = "http://ivypayments.ddns.net:8000/api/v1/auth/google/login";
   };
 
   const handleGitHubLogin = () => {
-    window.location.href = "http://localhost:8000/api/v1/auth/github/login";
+    window.location.href = "http://ivypayments.ddns.net:8000/api/v1/auth/github/login";
   };
-
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-neutral-50 via-white to-blue-50/30 flex flex-col px-4 py-6">
 

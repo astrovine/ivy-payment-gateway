@@ -1,4 +1,4 @@
-const base = import.meta.env.VITE_API_BASE_URL || 'http://192.168.194.221:8000'
+const base = import.meta.env.VITE_API_BASE_URL || 'http://51.21.130.249:8000'
 
 function buildUrl(path) {
   return base.replace(/\/$/, '') + path

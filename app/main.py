@@ -27,9 +27,9 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost",
-    "http://127.0.0.1",
-    "http://192.168.194.221:5173'",
     "http://localhost:3000",
+    "http://51.21.130.249:5173",
+    "http://ivypayments.ddns.net:5173"
 ]
 
 app.add_middleware(

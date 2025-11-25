@@ -1,0 +1,97 @@
+{
+    "family": "project-stack",
+    "networkMode": "host",
+    "requiresCompatibilities": ["EC2"],
+    "cpu": "1024",
+    "memory": "900",
+    "containerDefinitions": [
+        {
+            "name": "db",
+            "image": "postgres:15-alpine",
+            "cpu": 128,
+            "memoryReservation": 128,
+            "environment": [
+                {"name": "POSTGRES_USER", "value": "postgres"},
+                {"name": "POSTGRES_PASSWORD", "value": "postgres"},
+                {"name": "POSTGRES_DB", "value": "payments"}
+            ],
+            "essential": true
+        },
+        {
+            "name": "redis",
+            "image": "redis:alpine",
+            "cpu": 64,
+            "memoryReservation": 64,
+            "essential": true
+        },
+        {
+            "name": "web",
+            "image": "404119728613.dkr.ecr.eu-north-1.amazonaws.com/project-backend:latest",
+            "cpu": 256,
+            "memoryReservation": 256,
+            "command": ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+            "environment": [
+                {"name": "DATABASE_HOST", "value": "localhost"},
+                {"name": "DATABASE_PORT", "value": "5432"},
+                {"name": "DATABASE_USER", "value": "postgres"},
+                {"name": "DATABASE_PASSWORD", "value": "postgres"},
+                {"name": "DATABASE_NAME", "value": "payments"},
+                {"name": "CELERY_BROKER_URL", "value": "redis://localhost:6379/0"},
+                {"name": "CELERY_RESULT_BACKEND", "value": "redis://localhost:6379/1"},
+                {"name": "ALLOWED_HOSTS", "value": "*"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/project-stack",
+                    "awslogs-region": "eu-north-1",
+                    "awslogs-stream-prefix": "web"
+                }
+            },
+            "essential": true,
+            "dependsOn": [
+                {"containerName": "db", "condition": "START"},
+                {"containerName": "redis", "condition": "START"}
+            ]
+        },
+        {
+            "name": "worker",
+            "image": "404119728613.dkr.ecr.eu-north-1.amazonaws.com/project-backend:latest",
+            "cpu": 128,
+            "memoryReservation": 128,
+            "command": ["celery", "-A", "app.celery_worker.celery_app", "worker", "--loglevel=info"],
+            "environment": [
+                {"name": "DATABASE_HOST", "value": "localhost"},
+                {"name": "DATABASE_PORT", "value": "5432"},
+                {"name": "DATABASE_USER", "value": "postgres"},
+                {"name": "DATABASE_PASSWORD", "value": "postgres"},
+                {"name": "DATABASE_NAME", "value": "payments"},
+                {"name": "CELERY_BROKER_URL", "value": "redis://localhost:6379/0"},
+                {"name": "CELERY_RESULT_BACKEND", "value": "redis://localhost:6379/1"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/project-stack",
+                    "awslogs-region": "eu-north-1",
+                    "awslogs-stream-prefix": "worker"
+                }
+            },
+            "essential": true,
+            "dependsOn": [
+                {"containerName": "redis", "condition": "START"}
+            ]
+        },
+        {
+            "name": "client",
+            "image": "404119728613.dkr.ecr.eu-north-1.amazonaws.com/project-client:latest",
+            "cpu": 128,
+            "memoryReservation": 128,
+            "environment": [
+                {"name": "NODE_ENV", "value": "development"},
+                {"name": "VITE_API_BASE_URL", "value": "http://13.51.6.249:8000"}
+            ],
+            "essential": true
+        }
+    ]
+}

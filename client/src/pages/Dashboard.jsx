@@ -290,8 +290,10 @@ export default function Dashboard() {
       </>
     )
   }
+  const rawName = user?.name || (user?.email ? user.email.split('@')[0] : '') || 'there'
+  const firstName = rawName.toString().trim().split(' ')[0] || 'there'
+  const userName = firstName.charAt(0).toUpperCase() + firstName.slice(1)
 
-  const userName = user?.name || user?.email?.split('@')[0] || 'there'
   const availableBalance = parseFloat(balance?.available_balance || 0)
   const pendingBalance = parseFloat(balance?.pending_balance || 0)
   const totalVolume = availableBalance + pendingBalance

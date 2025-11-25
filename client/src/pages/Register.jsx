@@ -105,12 +105,11 @@ export default function Register() {
   }
 
   const handleGoogleSignup = () => {
-    window.location.href = "http://localhost:8000/api/v1/auth/google/login";
+    window.location.href = "http://ivypayments.ddns.net:8000/api/v1/auth/google/login";
   }
 
-  // 4. THIS IS THE FIX
   const handleGithubSignup = () => {
-    window.location.href = "http://localhost:8000/api/v1/auth/github/login";
+    window.location.href = "http://ivypayments.ddns.net:8000/api/v1/auth/github/login";
   }
 
   const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-neutral-700', 'bg-neutral-900']

@@ -18,7 +18,7 @@ class Config(BaseSettings):
     SESSION_SECRET_KEY: str
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = "http://ivypayments.ddns.net:8000/auth/google/callback"
     GITHUB_CLIENT_ID: str
     GITHUB_CLIENT_SECRET: str
 

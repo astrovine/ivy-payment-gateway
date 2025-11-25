@@ -3,12 +3,6 @@ import { useAuth } from '../context/AuthContext'
 import { useEffect, useState } from 'react'
 import { Globe, ShieldCheck, Zap, Check } from 'lucide-react'
 
-import revolutIcon from '../assets/icons8-revolut-50.png'
-import boaIcon from '../assets/icons8-bank-of-america-50.png'
-import airbnbIcon from '../assets/icons8-airbnb-50.png'
-import britishAirwaysIcon from '../assets/icons8-british-airways-50.png'
-import vectionIcon from '../assets/icons8-vection-group-50.png'
-
 export default function LandingPage() {
   const { token } = useAuth()
   const navigate = useNavigate()
@@ -108,20 +102,69 @@ export default function LandingPage() {
   if (token) {
     return null
   }
-
-  const trustedCompanies = [
-
-    { name: 'Revolut', logo: revolutIcon },
-
-    { name: 'Bank of America', logo: boaIcon },
-    { name: 'Airbnb', logo: airbnbIcon },
-    { name: 'British Airways', logo: britishAirwaysIcon },
-    { name: 'Vection Group', logo: vectionIcon }
-  ]
-
+const techStack = [
+  {
+    name: 'Python / FastAPI',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-full h-full text-gray-400" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14.31.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.83l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.23l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.24l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33.22-.41.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24.4.16.36.09.32.05.24.02.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35.14.33.1.3.06.26.04.21.02.13.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01.21.03zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z" fill="currentColor"/>
+      </svg>
+    )
+  },
+  {
+    name: 'React',
+    icon: (
+      <svg viewBox="-10.5 -9.45 21 18.9" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full text-gray-400">
+        <circle cx="0" cy="0" r="2" fill="currentColor"></circle>
+        <g stroke="currentColor" strokeWidth="1" fill="none">
+          <ellipse rx="10" ry="4.5"></ellipse>
+          <ellipse rx="10" ry="4.5" transform="rotate(60)"></ellipse>
+          <ellipse rx="10" ry="4.5" transform="rotate(120)"></ellipse>
+        </g>
+      </svg>
+    )
+  },
+{
+  name: 'Docker',
+  icon: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-full h-full text-gray-400" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13 15l2.5-1.5L18 15l-2.5 1.5L13 15zm-4.5 0l2.5-1.5L13.5 15l-2.5 1.5L8.5 15zm0-3l2.5-1.5L13.5 12l-2.5 1.5L8.5 12zm-4.5 3l2.5-1.5L9 15l-2.5 1.5L4 15zm0-3l2.5-1.5L9 12l-2.5 1.5L4 12zm0-3l2.5-1.5L9 9 6.5 10.5 4 9z" fill="currentColor"/>
+      <path d="M1.6 13.4c.2.2.2.6 0 .8l-1.2.8c-.2.2-.6.2-.8 0l-.2-.2c-.2-.2-.2-.6 0-.8l1.2-.8c.2-.2.6-.2.8 0l.2.2z" fill="currentColor"/>
+      <path fillRule="evenodd" clipRule="evenodd" d="M23.63 8.9c-.34-.1-.7-.05-1 .13l-1.72 1.15-2.6-1.5L20.05 7.5a1.5 1.5 0 0 0 .48-1.18c0-1.02-.83-1.85-1.85-1.85a1.84 1.84 0 0 0-.95.27l-2.66 1.77-1.52-.88c-.25-.15-.55-.15-.8 0l-1.52.88-2.66-1.77a1.84 1.84 0 0 0-.95-.27c-1.02 0-1.85.83-1.85 1.85 0 .46.17.89.48 1.18l1.74 1.18-2.6 1.5-1.72-1.15a1.1 1.1 0 0 0-1 .13c-.34.23-.54.61-.54 1.02v5.4c0 1.1 1.79 2 4 2s4-.9 4-2V14l2.5-1.5v3c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-3l2.5 1.5v1.4c0 1.1 1.79 2 4 2s4-.9 4-2v-5.4c0-.41-.2-.79-.54-1.02zM6 16c0 .4-.73.8-1.8.93v-1.76l1.8-1.04V16zm14 0v-1.87l1.8 1.04v1.76C20.73 16.8 20 16.4 20 16z" fill="currentColor"/>
+    </svg>
+  )
+},
+{
+  name: 'PostgreSQL',
+  icon: (
+    <svg viewBox="0 0 24 24" fill="none" className="w-full h-full text-gray-400" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" fill="currentColor"/>
+      <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z" fill="currentColor"/>
+    </svg>
+  )
+},
+  {
+    name: 'Redis',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-full h-full text-gray-400" xmlns="http://www.w3.org/2000/svg">
+         <path d="M20.5 11.5l-8.5-5-8.5 5V21l8.5 5 8.5-5v-9.5z" stroke="currentColor" strokeWidth="2"/>
+         <path d="M12 16.5l-4.5-2.5M12 16.5l4.5-2.5M12 16.5V21.5" stroke="currentColor" strokeWidth="2"/>
+         <path d="M12 6.5L7.5 9M12 6.5l4.5 2.5" stroke="currentColor" strokeWidth="2"/>
+      </svg>
+    )
+  },
+  {
+    name: 'AWS',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-full h-full text-gray-400" xmlns="http://www.w3.org/2000/svg">
+         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    )
+  }
+]
   return (
     <div className="min-h-screen bg-white grain font-sans antialiased">
-      
+
 
 
         <nav className={`fixed top-0 w-full z-50 transition-all duration-500 ${
@@ -143,22 +186,22 @@ export default function LandingPage() {
 
 
               <div className="hidden lg:flex items-center gap-8">
-                <a href="#products" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
+                <a href="https://cross-border-payments.vercel.app/" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   Products
                 </a>
-                <a href="#developers" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
+                <a href="https://github.com/astrovine/ivy-payment-gateway" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   Developers
                 </a>
-                <a href="#docs" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
+                <a href="http://ivypayments.ddns.net:8000/docs" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   Docs
                 </a>
                 <a href="#pricing" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   Pricing
                 </a>
-                <a href="#api" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
+                <a href="http://ivypayments.ddns.net:8000/docs" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   API
                 </a>
-                <a href="#support" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
+                <a href="https://github.com/astrovine" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors">
                   Support
                 </a>
               </div>
@@ -438,24 +481,22 @@ export default function LandingPage() {
       <section className="py-20 md:py-24 px-6 bg-neutral-50/50 border-y border-neutral-200 overflow-hidden">
         <div className="max-w-full mx-auto">
           <p className="text-center text-xs font-semibold text-neutral-500 tracking-wider uppercase mb-10 md:mb-14">
-            Powering payments for industry leaders
+            Built on Modern Infrastructure
           </p>
 
           <div className="relative">
             <div className="logos-scroll-container group">
               <div className="logos-scroll flex items-center gap-12 md:gap-16 lg:gap-20">
 
-                {[...trustedCompanies, ...trustedCompanies].map((company, idx) => (
+                {[...techStack, ...techStack].map((company, idx) => (
                   <div
                     key={idx}
                     className="flex flex-col items-center justify-center opacity-60 hover:opacity-100 transition-opacity duration-300 flex-shrink-0"
                   >
                     <div className="w-20 h-20 md:w-24 md:h-24 bg-white rounded-2xl border-2 border-neutral-200 flex items-center justify-center p-4 md:p-5 hover:border-neutral-300 hover:shadow-xl transition-all duration-300 transform hover:scale-105">
-                      <img
-                        src={company.logo}
-                        alt={company.name}
-                        className="w-full h-full object-contain grayscale hover:grayscale-0 transition-all duration-300"
-                      />
+                      <div className="w-full h-full p-2 text-neutral-400 hover:text-neutral-900 transition-colors duration-300">
+                      {company.icon}
+                    </div>
                     </div>
                     <span className="text-xs md:text-sm font-semibold text-neutral-600 mt-3 whitespace-nowrap">
                       {company.name}
@@ -1079,7 +1120,7 @@ export default function LandingPage() {
 <span className="text-purple-400">from</span> <span className="text-emerald-400">decimal</span> <span className="text-purple-400">import</span> <span className="text-emerald-400">Decimal</span>{'\n'}
 {'\n'}
 <span className="text-neutral-500"># Initialize Ivy API client</span>{'\n'}
-<span className="text-blue-400">BASE_URL</span> = <span className="text-amber-300">"https://api.ivy-payments.com"</span>{'\n'}
+<span className="text-blue-400">BASE_URL</span> = <span className="text-amber-300">"https://ivypayments.ddns.net:8000"</span>{'\n'}
 <span className="text-blue-400">API_KEY</span> = <span className="text-amber-300">"sk_live_..."</span>  <span className="text-neutral-500"># Your secret key</span>{'\n'}
 {'\n'}
 <span className="text-blue-400">headers</span> = {'{'}{'\n'}
@@ -1170,7 +1211,7 @@ export default function LandingPage() {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between items-center">
                     <span className="text-neutral-600">Base URL</span>
-                    <code className="px-2 py-1 bg-white rounded text-neutral-900 font-mono text-xs">https://api.ivy-payments.com</code>
+                    <code className="px-2 py-1 bg-white rounded text-neutral-900 font-mono text-xs">http://ivypayments.ddns.net:8000</code>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-neutral-600">Authentication</span>
@@ -1501,9 +1542,9 @@ export default function LandingPage() {
               © {new Date().getFullYear()} Ivy Technologies, Inc. All rights reserved.
             </p>
             <div className="flex items-center gap-6 text-sm">
-              <a href="#" className="text-neutral-600 hover:text-neutral-900 transition-colors">Status</a>
-              <a href="#" className="text-neutral-600 hover:text-neutral-900 transition-colors">Support</a>
-              <a href="#" className="text-neutral-600 hover:text-neutral-900 transition-colors">Contact</a>
+              <a href="http://ivypayments.ddns.net:8000/docs" className="text-neutral-600 hover:text-neutral-900 transition-colors">Status</a>
+              <a href="https://github.com/astrovine" className="text-neutral-600 hover:text-neutral-900 transition-colors">Support</a>
+              <a href="https://github.com/astrovine" className="text-neutral-600 hover:text-neutral-900 transition-colors">Contact</a>
             </div>
           </div>
         </div>
