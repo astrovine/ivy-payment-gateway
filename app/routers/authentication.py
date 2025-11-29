@@ -418,13 +418,13 @@ async def google_callback(
     access_token = Oauth2.create_access_token(data={"sub": str(user.id)})
     refresh_token = au.create_refresh_token(data={"sub": str(user.id)}, db=db)
     return RedirectResponse(
-        url=f"http://51.21.130.249:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+        url=f"http://ivypayments.ddns.net:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
     )
 
 
 @router.get("/auth/github/login")
 async def github_login(request: Request):
-    redirect_uri = "http://ivypayments.ddns.net:8000/auth/github/callback"
+    redirect_uri = "http://ivypayments.ddns.net:8000/api/v1/auth/github/callback"
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 
@@ -466,7 +466,6 @@ async def github_callback(
 
     access_token = Oauth2.create_access_token(data={"sub": str(user.id)})
     refresh_token = au.create_refresh_token(data={"sub": str(user.id)}, db=db)
-
     return RedirectResponse(
-        url=f"ivypayments.ddns.net:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
+        url=f"http://ivypayments.ddns.net:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
     )

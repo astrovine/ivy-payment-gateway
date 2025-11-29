@@ -186,7 +186,7 @@ export default function KYC() {
         formData.append('description', uploadForm.description)
       }
 
-      const response = await fetch('http://localhost:8000/api/v1/kyc/documents', {
+      const response = await fetch('http://ivypayments.ddns.net:8000/api/v1/kyc/documents', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` },
         body: formData

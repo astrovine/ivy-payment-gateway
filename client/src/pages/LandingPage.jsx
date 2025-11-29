@@ -13,9 +13,9 @@ export default function LandingPage() {
 
   const values = [
     "built for scale",
-    "trusted by thousands",
-    "secure & compliant",
-    "lightning fast"
+    "stable & trusted",
+    "lightning fast",
+    "secure & compliant"
   ]
 
   useEffect(() => {
@@ -234,22 +234,22 @@ const techStack = [
           {mobileMenuOpen && (
             <div className="lg:hidden border-t border-neutral-200 mt-3 animate-slide-up">
               <div className="px-4 py-3 space-y-1">
-                <a href="#products" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
+                <a href="https://cross-border-payments.vercel.app/" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   Products
                 </a>
-                <a href="#developers" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
+                <a href="https://github.com/astrovine/ivy-payment-gateway" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   Developers
                 </a>
-                <a href="#docs" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
+                <a href="http://ivypayments.ddns.net:8000/docs"  onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   Docs
                 </a>
                 <a href="#pricing" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   Pricing
                 </a>
-                <a href="#api" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
+                <a href="http://ivypayments.ddns.net:8000/docs" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   API
                 </a>
-                <a href="#support" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
+                <a href="https://github.com/astrovine" onClick={() => setMobileMenuOpen(false)} className="block text-base font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-50 py-3 px-4 rounded-lg transition-colors">
                   Support
                 </a>
               </div>
@@ -273,8 +273,8 @@ const techStack = [
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </span>
-                <span className="hidden sm:inline tabular-nums lining-nums">Trusted by 12,500+ businesses worldwide</span>
-                <span className="sm:hidden tabular-nums lining-nums">12,500+ businesses</span>
+                <span className="hidden sm:inline tabular-nums lining-nums">Built for reliability</span>
+                <span className="sm:hidden tabular-nums lining-nums">Built for reliability</span>
               </div>
             </div>
 
@@ -327,19 +327,18 @@ const techStack = [
               </a>
             </div>
 
-
-            <div className="pt-16 md:pt-20 grid grid-cols-1 sm:grid-cols-3 gap-10 sm:gap-8 md:gap-12 max-w-4xl mx-auto animate-in-4 px-4">
+<div className="pt-16 md:pt-20 grid grid-cols-1 sm:grid-cols-3 gap-10 sm:gap-8 md:gap-12 max-w-4xl mx-auto animate-in-4 px-4">
               <div className="text-center">
-                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">₦4.2B+</div>
-                <div className="text-sm md:text-sm text-neutral-600 font-medium">Processed annually</div>
+                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">ACID</div>
+                <div className="text-sm md:text-sm text-neutral-600 font-medium">Compliant Ledger</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">150+</div>
-                <div className="text-sm md:text-sm text-neutral-600 font-medium">Countries</div>
+                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">OAuth2</div>
+                <div className="text-sm md:text-sm text-neutral-600 font-medium">Secure Authentication</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">99.99%</div>
-                <div className="text-sm md:text-sm text-neutral-600 font-medium">Uptime SLA</div>
+                <div className="text-4xl sm:text-3xl md:text-5xl font-bold text-neutral-900 mb-2 tabular-nums lining-nums tracking-tight">100%</div>
+                <div className="text-sm md:text-sm text-neutral-600 font-medium">Data Integrity</div>
               </div>
             </div>
           </div>
@@ -387,7 +386,7 @@ const techStack = [
                             </svg>
                           </div>
                         </div>
-                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦84,580.50</div>
+                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦840,580.50</div>
                         <div className="text-xs md:text-sm">
                           <span className="text-emerald-600 font-semibold">↑ 12.5%</span>
                         </div>
@@ -403,7 +402,7 @@ const techStack = [
                             </svg>
                           </div>
                         </div>
-                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦90,240.00</div>
+                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦902,240.00</div>
                         <div className="flex items-center gap-1 text-sm">
                           <span className="text-amber-600 font-semibold">18 transactions</span>
                           <span className="text-neutral-500">processing</span>
@@ -420,7 +419,7 @@ const techStack = [
                             </svg>
                           </div>
                         </div>
-                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦174,820.00</div>
+                        <div className="text-3xl font-bold text-neutral-900 mb-1 tabular-nums lining-nums">₦1,742,820.50</div>
                         <div className="flex items-center gap-1 text-sm">
                           <span className="text-blue-600 font-semibold">↑ 8.2%</span>
                           <span className="text-neutral-500">this month</span>
@@ -521,29 +520,29 @@ const techStack = [
                 Built for the<br/>modern economy
               </h2>
               <p className="text-xl text-neutral-600 leading-relaxed">
-                Enterprise-grade payment infrastructure trusted by thousands of businesses worldwide.
+                Enterprise-grade payment infrastructure. Capable of handling complex transaction flows with ease
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:gap-4 md:gap-6">
               <div className="space-y-3 sm:space-y-4 md:space-y-6">
                 <div className="bg-neutral-900 text-white p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl">
-                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 tabular-nums">135+</div>
-                  <div className="text-xs sm:text-sm text-neutral-400">Currencies</div>
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 tabular-nums">API</div>
+                  <div className="text-xs sm:text-sm text-neutral-400">First Design</div>
                 </div>
                 <div className="bg-white border-2 border-neutral-200 p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl">
-                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 text-neutral-900 tabular-nums">150+</div>
-                  <div className="text-xs sm:text-sm text-neutral-600">Countries</div>
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 text-neutral-900 tabular-nums">Live</div>
+                  <div className="text-xs sm:text-sm text-neutral-600">Time Updates</div>
                 </div>
               </div>
               <div className="space-y-3 sm:space-y-4 md:space-y-6 pt-6 sm:pt-8 md:pt-12">
                 <div className="bg-white border-2 border-neutral-200 p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl">
-                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 text-neutral-900 tabular-nums">99.99%</div>
-                  <div className="text-xs sm:text-sm text-neutral-600">Uptime</div>
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 text-neutral-900 tabular-nums">Global</div>
+                  <div className="text-xs sm:text-sm text-neutral-600">Currency Ready</div>
                 </div>
                 <div className="bg-neutral-900 text-white p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl">
-                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 tabular-nums break-all">&lt;500ms</div>
-                  <div className="text-xs sm:text-sm text-neutral-400">Response</div>
+                  <div className="text-3xl sm:text-4xl md:text-5xl font-bold mb-1 sm:mb-2 tabular-nums break-all">Async</div>
+                  <div className="text-xs sm:text-sm text-neutral-400">Job Queue</div>
                 </div>
               </div>
             </div>
@@ -563,7 +562,7 @@ const techStack = [
               Powering businesses worldwide
             </h2>
             <p className="text-xl text-neutral-400 max-w-3xl mx-auto leading-relaxed">
-              From startups to enterprises, Ivy's infrastructure adapts to your unique needs. See how we empower different industries.
+              From startups to enterprises, Ivy's infrastructure adapts to your unique needs. See how we can empower different industries.
             </p>
           </div>
 
@@ -576,10 +575,10 @@ const techStack = [
                 <span className="text-sm font-semibold text-neutral-300 uppercase tracking-wider">E-Commerce</span>
               </div>
               <h3 className="text-4xl md:text-5xl font-bold text-white leading-tight">
-                High-volume retail that scales
+                High volume retail that scales
               </h3>
               <p className="text-lg text-neutral-400 leading-relaxed">
-                Handle peak season traffic with auto-scaling infrastructure. Process 10K+ transactions per minute with sub-500ms response times. Your customers get a seamless checkout experience, every time.
+                Architected to handle peak traffic with horizontal scaling. Designed for high throughput with sub-500ms latency targets. Your customers get a seamless checkout experience, every time.
               </p>
               <div className="space-y-4 pt-4">
                 <div className="flex items-start gap-4">
@@ -878,9 +877,6 @@ const techStack = [
                         <div className="bg-white rounded-xl p-4 border-2 border-neutral-300 shadow-sm animate-slide-right" style={{animationDelay: '0.3s'}}>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-neutral-100 rounded-full flex items-center justify-center">
-                                <span className="text-lg">👤</span>
-                              </div>
                               <div>
                                 <p className="font-semibold text-neutral-900">Seller</p>
                                 <p className="text-xs text-neutral-600">85% commission</p>
@@ -894,9 +890,6 @@ const techStack = [
                         <div className="bg-white rounded-xl p-4 border-2 border-neutral-300 shadow-sm animate-slide-right" style={{animationDelay: '0.5s'}}>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-neutral-100 rounded-full flex items-center justify-center">
-                                <span className="text-lg">🏢</span>
-                              </div>
                               <div>
                                 <p className="font-semibold text-neutral-900">Platform</p>
                                 <p className="text-xs text-neutral-600">12% commission</p>
@@ -910,9 +903,6 @@ const techStack = [
                         <div className="bg-white rounded-xl p-4 border-2 border-neutral-200 shadow-sm animate-slide-right" style={{animationDelay: '0.7s'}}>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-neutral-100 rounded-full flex items-center justify-center">
-                                <span className="text-lg">⚡</span>
-                              </div>
                               <div>
                                 <p className="font-semibold text-neutral-900">Processing</p>
                                 <p className="text-xs text-neutral-600">3% fee</p>
@@ -1005,7 +995,7 @@ const techStack = [
                   </svg>
                 </Link>
                 <a
-                  href="#docs"
+                  href="http://ivypayments.ddns.net:8000/docs"
                   className="btn-secondary text-base px-8 py-3.5 inline-flex items-center gap-2 font-medium"
                 >
                   View documentation
@@ -1120,7 +1110,7 @@ const techStack = [
 <span className="text-purple-400">from</span> <span className="text-emerald-400">decimal</span> <span className="text-purple-400">import</span> <span className="text-emerald-400">Decimal</span>{'\n'}
 {'\n'}
 <span className="text-neutral-500"># Initialize Ivy API client</span>{'\n'}
-<span className="text-blue-400">BASE_URL</span> = <span className="text-amber-300">"https://ivypayments.ddns.net:8000"</span>{'\n'}
+<span className="text-blue-400">BASE_URL</span> = <span className="text-amber-300">"http://ivypayments.ddns.net:8000"</span>{'\n'}
 <span className="text-blue-400">API_KEY</span> = <span className="text-amber-300">"sk_live_..."</span>  <span className="text-neutral-500"># Your secret key</span>{'\n'}
 {'\n'}
 <span className="text-blue-400">headers</span> = {'{'}{'\n'}

@@ -179,7 +179,7 @@ export default function Register() {
                 <div className="pt-0">
                   <h3 className="font-semibold text-white mb-2">Verify Identity</h3>
                   <p className="text-sm text-neutral-400 leading-relaxed">
-                    Quick email verification to secure your account and ensure you're ready to go.
+                    Quick business verification to secure your account and ensure you're ready to go.
                   </p>
                 </div>
               </div>
@@ -225,7 +225,7 @@ export default function Register() {
                   <svg className="w-5 h-5 text-white flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
-                  24/7 developer support
+                 Developer support
                 </li>
               </ul>
             </div>
@@ -255,7 +255,7 @@ export default function Register() {
 
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-neutral-900 mb-2 text-center md:text-left">Create your account</h1>
-            <p className="text-sm md:text-base text-neutral-600 mb-6 md:mb-8 text-center md:text-left">Join 12,500+ businesses worldwide</p>
+            <p className="text-sm md:text-base text-neutral-600 mb-6 md:mb-8 text-center md:text-left">Join businesses worldwide</p>
 
 
           <div className="space-y-3 mb-6">
@@ -529,7 +529,7 @@ export default function Register() {
             <svg className="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            PCI-DSS Level 1 Certified
+            Secured
           </div>
           </div>
         </div>
