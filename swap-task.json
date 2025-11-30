@@ -1,0 +1,29 @@
+{
+    "family": "enable-swap",
+    "networkMode": "host",
+    "containerDefinitions": [
+        {
+            "name": "swap-builder",
+            "image": "alpine",
+            "memory": 128,
+            "essential": true,
+            "command": [
+                "/bin/sh", "-c",
+                "dd if=/dev/zero of=/host/swapfile bs=1M count=1024 && mkswap /host/swapfile && swapon /host/swapfile && echo 'Swap Enabled' && free -m"
+            ],
+            "mountPoints": [
+                {
+                    "sourceVolume": "host-root",
+                    "containerPath": "/host"
+                }
+            ],
+            "privileged": true
+        }
+    ],
+    "volumes": [
+        {
+            "name": "host-root",
+            "host": { "sourcePath": "/" }
+        }
+    ]
+}
