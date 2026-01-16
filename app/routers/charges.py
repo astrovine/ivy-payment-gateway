@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Header
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,18 +15,23 @@ from ..utilities.logger import setup_logger, log_user_action, log_security_event
 router = APIRouter(prefix="/v1/charges", tags=["Charges"])
 logger = setup_logger(__name__)
 
+
 @router.post("/", response_model=charge_schema.ChargeResponse, status_code=status.HTTP_201_CREATED)
 async def create_new_charge(
     charge_data: charge_schema.ChargeCreate,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user_or_api_key),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key")
 ):
     ip_address = request.client.host if request and request.client else "unknown"
-    logger.info(f"User {current_user.id} ({current_user.email}) initiated charge creation from {ip_address}")
+    # Store user attributes before any DB operations to avoid expired state issues
+    user_id = current_user.id
+    user_email = current_user.email
+    merchant_id = current_user.merchant_info.merchant_id if current_user.merchant_info else None
+    logger.info(f"User {user_id} ({user_email}) initiated charge creation from {ip_address}")
 
     final_idempotency_key = idempotency_key or x_idempotency_key or charge_data.idempotency_key
 
@@ -34,12 +40,11 @@ async def create_new_charge(
         logger.info(f"Using idempotency key: {final_idempotency_key} for charge creation")
 
     try:
-        new_charge = ChargeService.create_charge(db=db, user=current_user, charge_data=charge_data)
+        new_charge = await ChargeService.create_charge(db=db, user=current_user, charge_data=charge_data)
 
-        merchant_id = current_user.merchant_info.merchant_id if hasattr(current_user, 'merchant_info') and current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
-            user_id=current_user.id,
+            user_id=user_id,
             action="CHARGE_CREATED",
             resource_type="CHARGE",
             resource_id=new_charge.id,
@@ -54,20 +59,21 @@ async def create_new_charge(
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         response.headers["Location"] = f"/v1/charges/{new_charge.id}"
 
-        logger.info(f"Charge {new_charge.id} created successfully for user {current_user.id}")
+        logger.info(f"Charge {new_charge.id} created successfully for user {user_id}")
         return new_charge
 
     except ChargeCreationError as e:
-        logger.error(f"Failed to create charge for user {current_user.id}: {str(e)}", exc_info=True)
+        await db.rollback()
+        logger.error(f"Failed to create charge for user {user_id}: {str(e)}", exc_info=True)
         log_security_event(
             "CHARGE_CREATION_FAILED",
             {
-                "user_id": current_user.id,
-                "email": current_user.email,
+                "user_id": user_id,
+                "email": user_email,
                 "error": str(e),
                 "ip_address": ip_address
             },
@@ -75,12 +81,13 @@ async def create_new_charge(
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.critical(f"Unexpected error in create charge endpoint for user {current_user.id}: {e}", exc_info=True)
+        await db.rollback()
+        logger.critical(f"Unexpected error in create charge endpoint for user {user_id}: {e}", exc_info=True)
         log_security_event(
             "CHARGE_CREATION_ERROR",
             {
-                "user_id": current_user.id,
-                "email": current_user.email,
+                "user_id": user_id,
+                "email": user_email,
                 "error": str(e),
                 "ip_address": ip_address
             },
@@ -93,20 +100,30 @@ async def create_new_charge(
 async def list_charges(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user)
 ):
-    charges = db.query(db_models.Charge).filter_by(user_id=current_user.id).order_by(db_models.Charge.created_at.desc()).offset(skip).limit(limit).all()
-    return charges
+    result = await db.execute(
+        select(db_models.Charge)
+        .where(db_models.Charge.user_id == current_user.id)
+        .order_by(db_models.Charge.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all()
 
 
 @router.get("/{charge_id}", response_model=charge_schema.ChargeResponse)
 async def get_charge(
     charge_id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user)
 ):
-    charge = db.query(db_models.Charge).filter_by(id=charge_id, user_id=current_user.id).first()
+    result = await db.execute(
+        select(db_models.Charge)
+        .where(db_models.Charge.id == charge_id, db_models.Charge.user_id == current_user.id)
+    )
+    charge = result.scalar_one_or_none()
     if not charge:
-        raise HTTPException(status_code=status.HTTP_44_NOT_FOUND, detail="Charge not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charge not found")
     return charge

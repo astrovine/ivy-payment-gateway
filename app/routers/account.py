@@ -1,22 +1,22 @@
 from datetime import datetime, timezone
 from fastapi import Depends, APIRouter, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import db_models
 from ..schemas import account as user_schema
 from ..services.user_service import UserService
 from ..utilities import Oauth2 as au
-from ..utilities import db_con
 from ..utilities.db_con import get_db
 from ..utilities.exceptions import (
     UserNotFoundError, InvalidCredentialsError, PasswordMismatchError, DatabaseError,
 )
 from ..utilities.logger import log_user_action, setup_logger
 
-router = APIRouter(prefix="/api/v1/users", tags=["User Accont"])
+router = APIRouter(prefix="/api/v1/users", tags=["User Account"])
 logger = setup_logger(__name__)
 
+
 @router.get('/me', response_model=user_schema.UserMeResponse, status_code=status.HTTP_200_OK)
-async def get_current_users_detials(
+async def get_current_users_details(
     request: Request,
     current_user: db_models.User = Depends(au.get_current_user)
 ):
@@ -33,8 +33,7 @@ async def get_current_users_detials(
     else:
         onboarding_stage = "active"
 
-    logger.info(
-        f"Successfully returned full profile of user {current_user.id} (verified: {is_verified}) from {ip_address}")
+    logger.info(f"Successfully returned full profile of user {current_user.id} (verified: {is_verified}) from {ip_address}")
 
     return {
         "id": current_user.id,
@@ -51,7 +50,7 @@ async def get_current_users_detials(
 
 @router.get('/me/refresh', status_code=status.HTTP_200_OK)
 async def refresh_user_data(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user),
     request: Request = None
 ):
@@ -59,7 +58,7 @@ async def refresh_user_data(
     logger.info(f"User {current_user.id} refreshing their data from {ip_address}")
 
     try:
-        user = UserService.get_full_user_info(db=db, user_id=current_user.id)
+        user = await UserService.get_full_user_info(db=db, user_id=current_user.id)
 
         if not user:
             raise UserNotFoundError("User not found")
@@ -96,15 +95,15 @@ async def refresh_user_data(
 
 
 @router.put('/me', response_model=user_schema.UserUpdateRes, status_code=status.HTTP_200_OK)
-async def update_user_info(data: user_schema.UserUpdate, request: Request = None, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def update_user_info(data: user_schema.UserUpdate, request: Request = None, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} updating profile from {ip_address}")
 
     try:
-        updated = UserService.update_user_account(db=db, user_id=current_user.id, update_data=data)
+        updated = await UserService.update_user_account(db=db, user_id=current_user.id, update_data=data)
 
         merchant_id = current_user.merchant_info.merchant_id if current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="PROFILE_UPDATED",
@@ -116,17 +115,18 @@ async def update_user_info(data: user_schema.UserUpdate, request: Request = None
             changes=data.model_dump(exclude_unset=True),
             extra_data={"updated_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
         logger.info(f"User {current_user.id} profile updated successfully")
         return updated
     except UserNotFoundError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.put('/me/password', status_code=status.HTTP_200_OK)
 async def change_password(
     data: user_schema.UserUpdatePassword,
-    db: Session = Depends(db_con.get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user),
     request: Request = None
 ):
@@ -134,7 +134,7 @@ async def change_password(
     logger.info(f"Password change request for user {current_user.id} from {ip_address}")
 
     try:
-        UserService.change_user_password(
+        await UserService.change_user_password(
             db=db,
             user=current_user,
             old_password=data.old_password,
@@ -143,7 +143,7 @@ async def change_password(
         )
 
         merchant_id = current_user.merchant_info.merchant_id if current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="PASSWORD_CHANGED",
@@ -154,32 +154,35 @@ async def change_password(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"changed_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
         logger.info(f"Password changed successfully for user {current_user.id}")
         return {"message": "Password updated successfully"}
 
     except InvalidCredentialsError:
+        await db.rollback()
         logger.warning(f"Invalid old password provided for user {current_user.id}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect old password")
     except PasswordMismatchError:
+        await db.rollback()
         logger.warning(f"New password mismatch for user {current_user.id}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New passwords do not match")
     except Exception as e:
+        await db.rollback()
         logger.error(f"Unexpected error changing password for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not change password")
 
 
 @router.get('/me/activity', status_code=status.HTTP_200_OK)
-async def user_activity(request: Request, db: Session = Depends(db_con.get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def user_activity(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User activity request for user {current_user.id} from IP {ip_address}")
     try:
-        activity = UserService.get_activity_logs(db=db, user=current_user)
+        activity = await UserService.get_activity_logs(db=db, user=current_user)
         if not activity:
             logger.warning(f"No activity logs for user {current_user.id} from ip {ip_address}")
             return []
         merchant_id = current_user.merchant_info.merchant_id if current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="ACTIVITY_LOGS",
@@ -191,17 +194,20 @@ async def user_activity(request: Request, db: Session = Depends(db_con.get_db), 
             changes=None,
             extra_data={"Requested_at": datetime.now(timezone.utc).isoformat()}
         )
+        await db.commit()
         return activity
     except DatabaseError as e:
+        await db.rollback()
         logger.error(f"Error getting activity logs: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     except Exception as e:
+        await db.rollback()
         logger.error(f"Unexpected error getting activity logs: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.delete('/me', status_code=status.HTTP_204_NO_CONTENT)
-async def delete_me(request: Request = None, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def delete_me(request: Request = None, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.email}) requesting account deletion from {ip_address}")
 
@@ -210,7 +216,7 @@ async def delete_me(request: Request = None, db: Session = Depends(get_db), curr
         user_email = current_user.email
         user_id = current_user.id
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=user_id,
             action="ACCOUNT_DELETED",
@@ -222,13 +228,12 @@ async def delete_me(request: Request = None, db: Session = Depends(get_db), curr
             extra_data={"email": user_email, "deleted_at": datetime.now(timezone.utc).isoformat()}
         )
 
-        UserService.delete_user_account(db=db, user_id=user_id)
-        db.commit()
+        await UserService.delete_user_account(db=db, user_id=user_id)
+        await db.commit()
         logger.info(f"User {user_id} ({user_email}) account deleted successfully")
     except UserNotFoundError as e:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

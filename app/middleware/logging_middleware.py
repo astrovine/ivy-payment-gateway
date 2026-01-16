@@ -102,29 +102,59 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
         "<script>", "javascript:", "onerror=",  # XSS attempts
         "../", "..\\",  # Path traversal
         "<?php", "<?=",  # Code injection
+        "UNION", "OR 1=1", "' OR '", "-- ", ";--",  # Additional SQL patterns
+    ]
+    
+    BLOCKED_PATTERNS = [
+        "' OR '", "OR 1=1", "UNION SELECT", "DROP TABLE", "DELETE FROM",
+        "<script>", "javascript:", "onerror=", "<?php",
+    ]
+    
+    SAFE_PATHS = [
+        "/docs", "/openapi.json", "/redoc",
     ]
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Check for suspicious patterns in path and query params
         full_path = str(request.url)
-
-        for pattern in self.SUSPICIOUS_PATTERNS:
-            if pattern.lower() in full_path.lower():
-                log_security_event(
-                    "SUSPICIOUS_REQUEST",
-                    {
-                        "pattern": pattern,
-                        "path": request.url.path,
-                        "ip_address": request.client.host if request.client else "unknown",
-                        "user_agent": request.headers.get("user-agent", "unknown")
-                    },
-                    severity="WARNING"
-                )
-                break
-
-
-        if request.url.path.endswith("/login") and request.method == "POST":
-            pass
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        
+        is_safe_path = any(request.url.path.startswith(safe) for safe in self.SAFE_PATHS)
+        
+        if not is_safe_path:
+            for pattern in self.BLOCKED_PATTERNS:
+                if pattern.lower() in full_path.lower():
+                    log_security_event(
+                        "BLOCKED_MALICIOUS_REQUEST",
+                        {
+                            "pattern": pattern,
+                            "path": request.url.path,
+                            "ip_address": client_ip,
+                            "user_agent": user_agent,
+                            "full_url": full_path[:200]
+                        },
+                        severity="CRITICAL"
+                    )
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(
+                        status_code=400,
+                        content={"detail": "Bad request"}
+                    )
+            
+            for pattern in self.SUSPICIOUS_PATTERNS:
+                if pattern.lower() in full_path.lower():
+                    log_security_event(
+                        "SUSPICIOUS_REQUEST",
+                        {
+                            "pattern": pattern,
+                            "path": request.url.path,
+                            "ip_address": client_ip,
+                            "user_agent": user_agent
+                        },
+                        severity="WARNING"
+                    )
+                    break
 
         response = await call_next(request)
         return response
+

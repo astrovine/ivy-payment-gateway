@@ -1,4 +1,5 @@
-from sqlalchemy.orm import Session
+from sqlalchemy import select, update, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import db_models
 from app.utilities.logger import setup_logger
 from app.utilities.exceptions import ResourceNotFoundError
@@ -6,35 +7,55 @@ from datetime import datetime, timezone
 
 logger = setup_logger(__name__)
 
+
 class NotificationService:
     @staticmethod
-    def list_notifications(db: Session, merchant_id: str, limit: int = 50, skip: int = 0):
-        return db.query(db_models.Notification).filter_by(merchant_id=merchant_id).order_by(db_models.Notification.created_at.desc()).offset(skip).limit(limit).all()
+    async def list_notifications(db: AsyncSession, merchant_id: str, limit: int = 50, skip: int = 0):
+        result = await db.execute(
+            select(db_models.Notification)
+            .where(db_models.Notification.merchant_id == merchant_id)
+            .order_by(db_models.Notification.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return result.scalars().all()
 
     @staticmethod
-    def get_unread_count(db: Session, merchant_id: str):
-        return db.query(db_models.Notification).filter_by(merchant_id=merchant_id, is_read=False).count()
+    async def get_unread_count(db: AsyncSession, merchant_id: str):
+        result = await db.execute(
+            select(func.count(db_models.Notification.id))
+            .where(db_models.Notification.merchant_id == merchant_id, db_models.Notification.is_read == False)
+        )
+        return result.scalar() or 0
 
     @staticmethod
-    def mark_read(db: Session, merchant_id: str, notification_id: int):
-        n = db.query(db_models.Notification).filter_by(merchant_id=merchant_id, id=notification_id).first()
+    async def mark_read(db: AsyncSession, merchant_id: str, notification_id: int):
+        result = await db.execute(
+            select(db_models.Notification)
+            .where(db_models.Notification.merchant_id == merchant_id, db_models.Notification.id == notification_id)
+        )
+        n = result.scalar_one_or_none()
         if not n:
             raise ResourceNotFoundError('Notification')
         n.is_read = True
         n.updated_at = datetime.now(timezone.utc)
         db.add(n)
-        db.commit()
-        db.refresh(n)
+        await db.commit()
+        await db.refresh(n)
         return n
 
     @staticmethod
-    def mark_all_read(db: Session, merchant_id: str):
-        db.query(db_models.Notification).filter_by(merchant_id=merchant_id, is_read=False).update({'is_read': True})
-        db.commit()
+    async def mark_all_read(db: AsyncSession, merchant_id: str):
+        await db.execute(
+            update(db_models.Notification)
+            .where(db_models.Notification.merchant_id == merchant_id, db_models.Notification.is_read == False)
+            .values(is_read=True)
+        )
+        await db.commit()
         return True
 
     @staticmethod
-    def create_notification(db: Session, merchant_id: str, user_id: int | None, type: str, message: str, data: str | None = None) -> db_models.Notification:
+    async def create_notification(db: AsyncSession, merchant_id: str, user_id: int | None, type: str, message: str, data: str | None = None) -> db_models.Notification:
         n = db_models.Notification(
             merchant_id=merchant_id,
             user_id=user_id,
@@ -44,7 +65,7 @@ class NotificationService:
             is_read=False
         )
         db.add(n)
-        db.commit()
-        db.refresh(n)
+        await db.commit()
+        await db.refresh(n)
         logger.info(f"Notification created for merchant {merchant_id}: {type} - {message}")
         return n

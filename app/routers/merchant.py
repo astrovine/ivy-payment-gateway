@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import Depends, APIRouter, HTTPException, status, Request
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..models import db_models
 from ..schemas import merchant as mer, ledger
-from ..services.merchant_service import  MerchantService
+from ..services.merchant_service import MerchantService
 from ..utilities import Oauth2 as au
 from ..utilities.db_con import get_db
 from ..utilities.exceptions import VerificationError, DatabaseError
@@ -15,8 +17,9 @@ from ..utilities.logger import log_user_action, log_security_event, setup_logger
 logger = setup_logger(__name__)
 router = APIRouter(prefix="/api/v1/merchant", tags=["Merchant"])
 
+
 @router.post('/account', response_model=mer.MerchantAccountRes, status_code=status.HTTP_201_CREATED)
-async def create_merchant(data:mer.MerchantAccountCreate, request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def create_merchant(data: mer.MerchantAccountCreate, request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.name}) initiated merchant account creation from {ip_address}")
 
@@ -29,12 +32,13 @@ async def create_merchant(data:mer.MerchantAccountCreate, request: Request, db: 
                 severity="WARNING"
             )
             raise VerificationError('Please Verify your account first')
-        user = db.query(db_models.UserVerified).filter(db_models.UserVerified.user_id == current_user.id).first()
 
+        result = await db.execute(select(db_models.UserVerified).where(db_models.UserVerified.user_id == current_user.id))
+        user = result.scalar_one_or_none()
 
-        new_merchant = MerchantService.create_merchant_account(db=db, data=data, user_id=current_user.id)
+        new_merchant = await MerchantService.create_merchant_account(db=db, data=data, user_id=current_user.id)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action='MERCHANT_ACCOUNT_CREATED',
@@ -45,36 +49,36 @@ async def create_merchant(data:mer.MerchantAccountCreate, request: Request, db: 
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={
                 "merchant_id": new_merchant.merchant_id,
-                "business_name": user.business_name,
-                "business_type": user.business_type.value if hasattr(user.business_type, 'value') else str(user.business_type),
+                "business_name": user.business_name if user else "N/A",
+                "business_type": user.business_type.value if user and hasattr(user.business_type, 'value') else str(user.business_type) if user else "N/A",
                 "settlement_schedule": new_merchant.settlement_schedule,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
         logger.info(f"Merchant account {new_merchant.merchant_id} created successfully for user {current_user.id}")
         return new_merchant
 
     except VerificationError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except IntegrityError as e:
-        db.rollback()
+        await db.rollback()
         logger.warning(f"Duplicate merchant account attempt for user {current_user.id} from {ip_address}: {e}")
         log_security_event(
             "DUPLICATE_MERCHANT_CREATION_ATTEMPT",
             {"user_id": current_user.id, "email": current_user.email, "ip_address": ip_address},
             severity="WARNING"
         )
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="A merchant account for this user already exists.")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A merchant account for this user already exists.")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error creating merchant account for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal error occurred.")
 
 
 @router.get('/account', response_model=mer.MerchantAccountRes, status_code=status.HTTP_200_OK)
-async def get_merchant(request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def get_merchant(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.name}) requesting merchant account details from {ip_address}")
 
@@ -88,13 +92,13 @@ async def get_merchant(request: Request, db: Session = Depends(get_db), current_
             )
             raise VerificationError('Please Verify your account first')
 
-        merchant_details = MerchantService.get_merchant_account(db=db, user_id=current_user.id)
+        merchant_details = await MerchantService.get_merchant_account(db=db, user_id=current_user.id)
 
         if merchant_details is None:
             logger.warning(f"User {current_user.id} has no merchant account found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="MERCHANT_ACCOUNT_VIEWED",
@@ -108,21 +112,23 @@ async def get_merchant(request: Request, db: Session = Depends(get_db), current_
                 "viewed_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
         logger.info(f"User {current_user.id} retrieved merchant account {merchant_details.merchant_id} successfully")
         return merchant_details
 
     except VerificationError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
         logger.error(f"Error retrieving merchant account for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve merchant account")
 
 
 @router.put('/account', response_model=mer.MerchantAccountRes, status_code=status.HTTP_200_OK)
-async def update_merchant_account(data: mer.MerchantAccountUpdate, request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def update_merchant_account(data: mer.MerchantAccountUpdate, request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.name}) updating merchant account from {ip_address}")
 
@@ -136,10 +142,10 @@ async def update_merchant_account(data: mer.MerchantAccountUpdate, request: Requ
             )
             raise VerificationError('Please Verify your account first')
 
-        updated_merchant = MerchantService.update_merchant_account(data=data, db=db, user_id=current_user.id)
+        updated_merchant = await MerchantService.update_merchant_account(data=data, db=db, user_id=current_user.id)
         updated_merchant.updated_at = datetime.now(timezone.utc)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="MERCHANT_ACCOUNT_UPDATED",
@@ -151,28 +157,29 @@ async def update_merchant_account(data: mer.MerchantAccountUpdate, request: Requ
             changes=data.model_dump(exclude_unset=True),
             extra_data={"updated_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
         logger.info(f"Merchant account {updated_merchant.merchant_id} updated successfully for user {current_user.id}")
         return updated_merchant
 
     except VerificationError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except IntegrityError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"IntegrityError updating merchant account for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid data provided")
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error updating merchant account for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error occurred")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error updating merchant account for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update merchant account")
 
 
 @router.get('/balance', response_model=mer.MerchantBalanceRes)
-async def get_merchant_balance(request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def get_merchant_balance(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.name}) requesting merchant balance from {ip_address}")
 
@@ -186,12 +193,12 @@ async def get_merchant_balance(request: Request, db: Session = Depends(get_db), 
             )
             raise VerificationError('Please Verify your account first')
 
-        balance = MerchantService.get_merchant_balance(db=db, user_id=current_user.id)
+        balance = await MerchantService.get_merchant_balance(db=db, user_id=current_user.id)
 
         merchant = current_user.merchant_info
         resource_id = merchant.merchant_id if merchant else None
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="MERCHANT_BALANCE_VIEWED",
@@ -205,30 +212,31 @@ async def get_merchant_balance(request: Request, db: Session = Depends(get_db), 
                 "viewed_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
         logger.info(f"User {current_user.id} retrieved merchant balance successfully")
         return balance
 
     except VerificationError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error retrieving merchant balance for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve merchant balance")
 
+
 @router.get('/balance/history', response_model=List[ledger.BalanceHistory], status_code=status.HTTP_200_OK)
-async def get_merchant_balance_history(request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def get_merchant_balance_history(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Retrieving balance history for user:{current_user.id} ({current_user.name}) from {ip_address}")
     merchant = current_user.merchant_info
     if not current_user.verified_info or not merchant:
         logger.warning(f"User {current_user.id} attempted to get balance history but is not verified with a merchant account.")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Merchant account not found. Please create one first.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found. Please create one first.")
     try:
-        balance_history = MerchantService.get_merchant_balance_history(db=db, merchant_id=merchant.merchant_id)
+        balance_history = await MerchantService.get_merchant_balance_history(db=db, merchant_id=merchant.merchant_id)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="BALANCE_HISTORY_VIEWED",
@@ -239,14 +247,14 @@ async def get_merchant_balance_history(request: Request, db: Session = Depends(g
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"transaction_count": len(balance_history) if balance_history else 0}
         )
-        db.commit()
+        await db.commit()
 
         if not balance_history:
             logger.info(f'Could not find any balance for {merchant.merchant_id}')
             return []
         return balance_history
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f'Unexpected error occurred while getting balance history for {merchant.merchant_id}: {e}', exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get balance history")
 
@@ -254,23 +262,22 @@ async def get_merchant_balance_history(request: Request, db: Session = Depends(g
 @router.get('/limits', response_model=mer.TransactionLimitsRes, status_code=status.HTTP_200_OK)
 async def get_my_limits(
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} requesting transaction limits from {ip_address}")
 
-    merchant = MerchantService.get_merchant_account(db=db, user_id=current_user.id)
+    merchant = await MerchantService.get_merchant_account(db=db, user_id=current_user.id)
 
-    limits = db.query(db_models.TransactionLimit).filter(
-        db_models.TransactionLimit.merchant_id == merchant.merchant_id
-    ).first()
+    result = await db.execute(select(db_models.TransactionLimit).where(db_models.TransactionLimit.merchant_id == merchant.merchant_id))
+    limits = result.scalar_one_or_none()
 
     if not limits:
         logger.warning(f"Transaction limits not found for merchant {merchant.merchant_id}")
         raise HTTPException(status_code=404, detail="Transaction limits not found.")
 
-    log_user_action(
+    await log_user_action(
         db=db,
         user_id=current_user.id,
         action="TRANSACTION_LIMITS_VIEWED",
@@ -281,7 +288,7 @@ async def get_my_limits(
         user_agent=request.headers.get("user-agent") if request else None,
         extra_data={"viewed_at": datetime.now(timezone.utc).isoformat()}
     )
-    db.commit()
+    await db.commit()
     logger.info(f"User {current_user.id} retrieved transaction limits successfully")
 
     return limits
@@ -290,15 +297,13 @@ async def get_my_limits(
 @router.get('/fees', response_model=mer.FeeStructureRes, status_code=status.HTTP_200_OK)
 async def get_fee_structure(
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
-
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} requesting fee structure from {ip_address}")
 
     try:
-
         if not current_user.verified_info:
             logger.warning(f"Unverified user {current_user.id} attempted to access fee structure from {ip_address}")
             log_security_event(
@@ -308,12 +313,12 @@ async def get_fee_structure(
             )
             raise VerificationError('Please verify your account first')
 
-        fee_structure = MerchantService.get_fee_structure(db=db, user_id=current_user.id)
+        fee_structure = await MerchantService.get_fee_structure(db=db, user_id=current_user.id)
 
         merchant = current_user.merchant_info
         merchant_id = merchant.merchant_id if merchant else None
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="FEE_STRUCTURE_VIEWED",
@@ -324,27 +329,24 @@ async def get_fee_structure(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"viewed_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} retrieved fee structure successfully")
         return fee_structure
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error retrieving fee structure for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve fee structure"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve fee structure")
 
 
 @router.get('/settings', response_model=mer.MerchantSettingsRes, status_code=status.HTTP_200_OK)
 async def get_merchant_settings(
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -360,12 +362,12 @@ async def get_merchant_settings(
             )
             raise VerificationError('Please verify your account first')
 
-        settings = MerchantService.get_merchant_settings(db=db, user_id=current_user.id)
+        settings = await MerchantService.get_merchant_settings(db=db, user_id=current_user.id)
 
         merchant = current_user.merchant_info
         merchant_id = merchant.merchant_id if merchant else None
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="MERCHANT_SETTINGS_VIEWED",
@@ -376,28 +378,25 @@ async def get_merchant_settings(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"viewed_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} retrieved merchant settings successfully")
         return settings
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error retrieving merchant settings for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve merchant settings"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve merchant settings")
 
 
 @router.put('/settings', response_model=mer.MerchantSettingsRes, status_code=status.HTTP_200_OK)
 async def update_merchant_settings(
         settings_data: mer.MerchantSettings,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -413,7 +412,7 @@ async def update_merchant_settings(
             )
             raise VerificationError('Please verify your account first')
 
-        updated_settings = MerchantService.update_merchant_settings(
+        updated_settings = await MerchantService.update_merchant_settings(
             db=db,
             user_id=current_user.id,
             settings_data=settings_data
@@ -422,7 +421,7 @@ async def update_merchant_settings(
         merchant = current_user.merchant_info
         merchant_id = merchant.merchant_id if merchant else None
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="MERCHANT_SETTINGS_UPDATED",
@@ -434,25 +433,19 @@ async def update_merchant_settings(
             changes=settings_data.model_dump(exclude_unset=True),
             extra_data={"updated_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} updated merchant settings successfully")
         return updated_settings
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error updating merchant settings for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error occurred"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error occurred")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error updating merchant settings for user {current_user.id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update merchant settings"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update merchant settings")

@@ -1,7 +1,4 @@
-"""
-logging configuration for payment gateway.
-Includes structured logging with rotation and audit trails.
-"""
+
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -9,12 +6,13 @@ from pathlib import Path
 from datetime import datetime
 import json
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import db_models
 
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -49,21 +47,20 @@ class JsonFormatter(logging.Formatter):
 
 
 class StandardFormatter(logging.Formatter):
-    """Standard readable format for console"""
     def format(self, record):
         colors = {
-            'DEBUG': '\033[36m',    # Cyan
-            'INFO': '\033[32m',     # Green
-            'WARNING': '\033[33m',  # Yellow
-            'ERROR': '\033[31m',    # Red
-            'CRITICAL': '\033[35m', # Magenta
+            'DEBUG': '\033[36m',
+            'INFO': '\033[32m',
+            'WARNING': '\033[33m',
+            'ERROR': '\033[31m',
+            'CRITICAL': '\033[35m',
         }
         reset = '\033[0m'
 
         color = colors.get(record.levelname, '')
 
         formatted = super().format(record)
-        if sys.stdout.isatty():  # Only colorize if output is to terminal
+        if sys.stdout.isatty():
             return f"{color}{formatted}{reset}"
         return formatted
 
@@ -89,7 +86,7 @@ def setup_logger(name: str, log_file: str = None, level=logging.INFO):
 
     file_handler = RotatingFileHandler(
         file_path,
-        maxBytes=10 * 1024 * 1024,  # 10MB
+        maxBytes=10 * 1024 * 1024,
         backupCount=5
     )
     file_handler.setLevel(level)
@@ -135,7 +132,7 @@ def setup_api_logger():
     api_file = LOGS_DIR / "api_requests.log"
     api_handler = RotatingFileHandler(
         api_file,
-        maxBytes=50 * 1024 * 1024,  # 50MB
+        maxBytes=50 * 1024 * 1024,
         backupCount=10
     )
     api_handler.setLevel(logging.INFO)
@@ -152,8 +149,8 @@ audit_logger = setup_audit_logger()
 api_logger = setup_api_logger()
 
 
-def log_user_action(
-        db: Session,
+async def log_user_action(
+        db: AsyncSession,
         user_id: int,
         action: str,
         resource_type: str,
@@ -197,6 +194,7 @@ def log_user_action(
     except Exception as e:
         app_logger.error(f"Failed to write to AuditLog database table: {e}", exc_info=True)
 
+
 def log_api_request(method: str, endpoint: str, status_code: int, response_time: float,
                    user_id: int = None, ip_address: str = None):
     extra = {
@@ -224,4 +222,3 @@ def log_security_event(event_type: str, details: dict, severity: str = "WARNING"
         audit_logger.error(message, extra=extra)
     else:
         audit_logger.warning(message, extra=extra)
-

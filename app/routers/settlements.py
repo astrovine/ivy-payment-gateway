@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.services.payout_service import PayoutService
@@ -15,9 +15,9 @@ logger = setup_logger(__name__)
 
 
 @router.get("/", response_model=List[payout_schema.SettlementReportRes])
-async def list_settlements(request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def list_settlements(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     try:
-        reports = PayoutService.list_settlement_reports(db=db, user_id=current_user.id)
+        reports = await PayoutService.list_settlement_reports(db=db, user_id=current_user.id)
         return reports
     except MerchantAccountNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")
@@ -27,9 +27,9 @@ async def list_settlements(request: Request, db: Session = Depends(get_db), curr
 
 
 @router.get("/schedule")
-async def get_schedule(request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def get_schedule(request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     try:
-        schedule = PayoutService.get_settlement_schedule(db=db, user_id=current_user.id)
+        schedule = await PayoutService.get_settlement_schedule(db=db, user_id=current_user.id)
         return schedule
     except MerchantAccountNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")
@@ -39,21 +39,23 @@ async def get_schedule(request: Request, db: Session = Depends(get_db), current_
 
 
 @router.put("/schedule")
-async def update_schedule(data: payout_schema.SettlementScheduleUpdate, request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def update_schedule(data: payout_schema.SettlementScheduleUpdate, request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     try:
-        updated = PayoutService.update_settlement_schedule(db=db, user_id=current_user.id, schedule=data.model_dump())
+        updated = await PayoutService.update_settlement_schedule(db=db, user_id=current_user.id, schedule=data.model_dump())
         return updated
     except MerchantAccountNotFoundError:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")
     except Exception as e:
+        await db.rollback()
         logger.exception("Error updating settlement schedule")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/{payout_id}", response_model=payout_schema.SettlementReportRes)
-async def get_settlement(payout_id: int, request: Request, db: Session = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
+async def get_settlement(payout_id: int, request: Request, db: AsyncSession = Depends(get_db), current_user: db_models.User = Depends(au.get_current_user)):
     try:
-        report = PayoutService.get_settlement_report(db=db, user_id=current_user.id, payout_id=payout_id)
+        report = await PayoutService.get_settlement_report(db=db, user_id=current_user.id, payout_id=payout_id)
         return report
     except MerchantAccountNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")

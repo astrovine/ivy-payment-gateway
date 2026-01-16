@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from ..schemas import payout as payout_schema
@@ -20,17 +20,16 @@ logger = setup_logger(__name__)
 async def create_payout(
         payout_data: payout_schema.PayoutCreate,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Payout creation request for user {current_user.email} from {ip_address}")
     try:
-        # resolve payout account and call service with explicit args
-        account = PayoutAccountService.get_payout_account(db=db, user=current_user, account_id=payout_data.payout_account_id)
-        new_payout = PayoutService.create_payout(db=db, user_id=current_user.id, amount=payout_data.amount, currency=payout_data.currency, account=account)
+        account = await PayoutAccountService.get_payout_account(db=db, user=current_user, account_id=payout_data.payout_account_id)
+        new_payout = await PayoutService.create_payout(db=db, user_id=current_user.id, amount=payout_data.amount, currency=payout_data.currency, account=account)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="PAYOUT_CREATED",
@@ -41,33 +40,32 @@ async def create_payout(
             user_agent=request.headers.get("user-agent"),
             extra_data={"amount": str(new_payout.amount), "currency": new_payout.currency}
         )
-        db.commit()
+        await db.commit()
         try:
-            NotificationService.create_notification(db=db, merchant_id=new_payout.merchant_id, user_id=current_user.id, type='payout.created', message=f"Payout requested: {new_payout.amount} {new_payout.currency}", data=str({"payout_id": new_payout.id}))
+            await NotificationService.create_notification(db=db, merchant_id=new_payout.merchant_id, user_id=current_user.id, type='payout.created', message=f"Payout requested: {new_payout.amount} {new_payout.currency}", data=str({"payout_id": new_payout.id}))
         except Exception:
             logger.exception("Failed to create notification for new payout")
         return new_payout
     except (PayoutError, MerchantAccountNotFoundError) as e:
-        db.rollback()
+        await db.rollback()
         logger.warning(f"Failed to create payout for {current_user.email}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error creating payout for {current_user.email}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="An internal server error occurred.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal server error occurred.")
 
 
 @router.get("/", response_model=List[payout_schema.PayoutRes])
 async def list_payouts(
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Listing payouts for user {current_user.email} from {ip_address}")
     try:
-        payouts = PayoutService.list_payouts(db=db, user_id=current_user.id)
+        payouts = await PayoutService.list_payouts(db=db, user_id=current_user.id)
         return payouts
     except (MerchantAccountNotFoundError, DatabaseError) as e:
         logger.error(f"Error listing payouts: {e}", exc_info=True)
@@ -78,14 +76,14 @@ async def list_payouts(
 async def get_payout(
         payout_id: int,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Fetching payout {payout_id} for user {current_user.email} from {ip_address}")
     try:
-        merchant = MerchantService.get_merchant_account(db=db, user_id=current_user.id)
-        payout = PayoutService.get_payout(db=db, user_id=current_user.id, payout_id=payout_id)
+        merchant = await MerchantService.get_merchant_account(db=db, user_id=current_user.id)
+        payout = await PayoutService.get_payout(db=db, user_id=current_user.id, payout_id=payout_id)
         if not payout:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout not found")
         return payout
@@ -97,16 +95,16 @@ async def get_payout(
 async def cancel_payout(
         payout_id: int,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Cancellation request for payout {payout_id} by {current_user.email} from {ip_address}")
     try:
-        merchant = MerchantService.get_merchant_account(db=db, user_id=current_user.id)
-        payout = PayoutService.cancel_payout(db=db, user_id=current_user.id, payout_id=payout_id)
+        merchant = await MerchantService.get_merchant_account(db=db, user_id=current_user.id)
+        payout = await PayoutService.cancel_payout(db=db, user_id=current_user.id, payout_id=payout_id)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="PAYOUT_CANCELLED",
@@ -117,15 +115,16 @@ async def cancel_payout(
             user_agent=request.headers.get("user-agent"),
             extra_data={"amount": str(payout.amount), "currency": payout.currency}
         )
-        db.commit()
+        await db.commit()
         try:
-            NotificationService.create_notification(db=db, merchant_id=payout.merchant_id, user_id=current_user.id, type='payout.cancelled', message=f"Payout cancelled: {payout.amount} {payout.currency}", data=str({"payout_id": payout.id}))
+            await NotificationService.create_notification(db=db, merchant_id=payout.merchant_id, user_id=current_user.id, type='payout.cancelled', message=f"Payout cancelled: {payout.amount} {payout.currency}", data=str({"payout_id": payout.id}))
         except Exception:
             logger.exception("Failed to create notification for payout cancellation")
         return payout
     except MerchantAccountNotFoundError:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merchant account not found")
     except PayoutError as e:
-        db.rollback()
+        await db.rollback()
         logger.warning(f"Failed to cancel payout {payout_id} for {current_user.email}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

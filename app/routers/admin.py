@@ -3,10 +3,10 @@ from typing import List
 
 from fastapi import Depends, APIRouter, HTTPException, status, Request
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import db_models
 from ..schemas import merchant as mer, ledger
-from ..services.merchant_service import  MerchantService
+from ..services.merchant_service import MerchantService
 from ..utilities import Oauth2 as au
 from ..utilities.db_con import get_db
 from ..utilities.exceptions import VerificationError, DatabaseError
@@ -21,13 +21,13 @@ async def update_merchant_limits(
         merchant_id: str,
         limits_data: mer.TransactionLimits,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         admin_user: db_models.User = Depends(au.get_current_superadmin)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Admin {admin_user.email} updating limits for merchant {merchant_id} from {ip_address}")
 
-    updated_limits = MerchantService.update_limits(
+    updated_limits = await MerchantService.update_limits(
         db=db,
         merchant_id=merchant_id,
         limits_data=limits_data
@@ -37,7 +37,7 @@ async def update_merchant_limits(
         logger.warning(f"Admin {admin_user.id} attempted to update limits for non-existent merchant {merchant_id}")
         raise HTTPException(status_code=404, detail="Merchant or limits not found.")
 
-    log_user_action(
+    await log_user_action(
         db=db,
         user_id=admin_user.id,
         action="ADMIN_UPDATE_MERCHANT_LIMITS",
@@ -52,7 +52,7 @@ async def update_merchant_limits(
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
     )
-    db.commit()
+    await db.commit()
     logger.info(f"Admin {admin_user.email} successfully updated limits for merchant {merchant_id}")
 
     return updated_limits

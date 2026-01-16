@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import Depends, APIRouter, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import db_models
 from ..schemas import api_key as api_key_schema
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/v1/api-keys", tags=["API Keys"])
 async def create_api_key(
         key_data: api_key_schema.APIKeyCreate,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -45,11 +45,9 @@ async def create_api_key(
             logger.warning(f"User {current_user.id} without merchant account attempted to create API key")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
 
-        # Create the API key
-        api_key, raw_key = MerchantService.create_api_key(db=db, user_id=current_user.id, key_data=key_data)
+        api_key, raw_key = await MerchantService.create_api_key(db=db, user_id=current_user.id, key_data=key_data)
 
-        # Log the action
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEY_CREATED",
@@ -66,7 +64,7 @@ async def create_api_key(
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"API key {api_key.id} created successfully for user {current_user.id}")
 
@@ -84,17 +82,17 @@ async def create_api_key(
         )
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except MerchantAccountNotFoundError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error creating API key for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create API key")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error creating API key for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
 
@@ -102,7 +100,7 @@ async def create_api_key(
 @router.get('', response_model=List[api_key_schema.APIKeyRes], status_code=status.HTTP_200_OK)
 async def list_api_keys(
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -122,9 +120,9 @@ async def list_api_keys(
             logger.warning(f"User {current_user.id} without merchant account attempted to list API keys")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
 
-        api_keys = MerchantService.get_api_keys(db=db, user_id=current_user.id)
+        api_keys = await MerchantService.get_api_keys(db=db, user_id=current_user.id)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEYS_LISTED",
@@ -134,23 +132,23 @@ async def list_api_keys(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"count": len(api_keys)}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} retrieved {len(api_keys)} API keys")
         return api_keys
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except MerchantAccountNotFoundError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error listing API keys for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve API keys")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error listing API keys for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
 
@@ -159,7 +157,7 @@ async def list_api_keys(
 async def get_api_key(
         key_id: int,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -178,8 +176,10 @@ async def get_api_key(
         if not current_user.merchant_info:
             logger.warning(f"User {current_user.id} without merchant account attempted to access API key")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
-        api_key = MerchantService.get_api_key_by_id(db=db, user_id=current_user.id, key_id=key_id)
-        log_user_action(
+
+        api_key = await MerchantService.get_api_key_by_id(db=db, user_id=current_user.id, key_id=key_id)
+
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEY_VIEWED",
@@ -190,23 +190,23 @@ async def get_api_key(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"key_id": key_id, "key_name": api_key.name}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} retrieved API key {key_id}")
         return api_key
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except (MerchantAccountNotFoundError, ResourceNotFoundError) as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error getting API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve API key")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error getting API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
 
@@ -216,7 +216,7 @@ async def update_api_key(
         key_id: int,
         update_data: api_key_schema.APIKeyUpdate,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -236,10 +236,9 @@ async def update_api_key(
             logger.warning(f"User {current_user.id} without merchant account attempted to update API key")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
 
-        # Update the API key
-        api_key = MerchantService.update_api_key(db=db, user_id=current_user.id, key_id=key_id, update_data=update_data)
+        api_key = await MerchantService.update_api_key(db=db, user_id=current_user.id, key_id=key_id, update_data=update_data)
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEY_UPDATED",
@@ -251,23 +250,23 @@ async def update_api_key(
             changes={"name": update_data.name},
             extra_data={"key_id": key_id, "new_name": update_data.name}
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} updated API key {key_id}")
         return api_key
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except (MerchantAccountNotFoundError, ResourceNotFoundError) as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error updating API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update API key")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error updating API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
 
@@ -277,7 +276,7 @@ async def revoke_api_key(
         key_id: int,
         revoke_data: api_key_schema.APIKeyRevoke,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
@@ -297,8 +296,7 @@ async def revoke_api_key(
             logger.warning(f"User {current_user.id} without merchant account attempted to revoke API key")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
 
-        # Revoke the API key
-        api_key = MerchantService.revoke_api_key(
+        api_key = await MerchantService.revoke_api_key(
             db=db,
             user_id=current_user.id,
             key_id=key_id,
@@ -317,7 +315,7 @@ async def revoke_api_key(
             severity="INFO"
         )
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEY_REVOKED",
@@ -332,23 +330,23 @@ async def revoke_api_key(
                 "revoked_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} revoked API key {key_id}")
         return api_key
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except (MerchantAccountNotFoundError, ResourceNotFoundError) as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error revoking API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke API key")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error revoking API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
 
@@ -357,14 +355,13 @@ async def revoke_api_key(
 async def roll_api_key(
         key_id: int,
         request: Request,
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
         current_user: db_models.User = Depends(au.get_current_user)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} rolling API key {key_id} from {ip_address}")
 
     try:
-
         if not current_user.verified_info:
             logger.warning(f"Unverified user {current_user.id} attempted to roll API key from {ip_address}")
             log_security_event(
@@ -378,7 +375,7 @@ async def roll_api_key(
             logger.warning(f"User {current_user.id} without merchant account attempted to roll API key")
             raise MerchantAccountNotFoundError("Please create a merchant account first")
 
-        new_key, raw_key = MerchantService.roll_api_key(db=db, user_id=current_user.id, key_id=key_id)
+        new_key, raw_key = await MerchantService.roll_api_key(db=db, user_id=current_user.id, key_id=key_id)
 
         log_security_event(
             event_type="API_KEY_ROLLED",
@@ -392,7 +389,7 @@ async def roll_api_key(
             severity="INFO"
         )
 
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="API_KEY_ROLLED",
@@ -407,7 +404,7 @@ async def roll_api_key(
                 "rolled_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"User {current_user.id} rolled API key {key_id} to {new_key.id}")
 
@@ -425,17 +422,16 @@ async def roll_api_key(
         )
 
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except (MerchantAccountNotFoundError, ResourceNotFoundError) as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except DatabaseError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Database error rolling API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to roll API key")
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error rolling API key {key_id} for user {current_user.id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred")
-

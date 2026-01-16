@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.celery_worker import celery_app
 from app.models import db_models
-from app.models.db_models import TransactionType, AccountType
+from app.models.enums import TransactionType, AccountType
 from app.utilities.exceptions import DatabaseError
 from app.utilities.logger import setup_logger
 from app.utilities.db_con import SessionLocal

@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """
 Usage:
-  python scripts/reconcile_payouts.py           # dry run
-  python scripts/reconcile_payouts.py --apply   # actually process them
-  python scripts/reconcile_payouts.py --id 123  # dry run single payout
-  python scripts/reconcile_payouts.py --id 123 --apply  # process single payout
+  python scripts/reconcile_payouts.py # dry run
+  python scripts/reconcile_payouts.py --apply # actually process them
+  python scripts/reconcile_payouts.py --id 123 # dry run single payout
+  python scripts/reconcile_payouts.py --id 123 --apply # process single payout
 
 """
 import argparse
@@ -63,7 +62,7 @@ def main():
             print(f"- id={p.id} merchant={p.merchant_id} amount={p.amount} currency={p.currency} created_at={p.created_at}")
 
         if args.apply:
-            print("\nApplying processing to each payout (this will modify DB).")
+            print("\nApplying processing to each payout.")
             for p in pending:
                 print(f"Processing payout {p.id}...")
                 try:

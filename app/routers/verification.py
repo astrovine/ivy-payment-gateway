@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import Depends, APIRouter, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import db_models
 from ..schemas import account as user_schema
@@ -22,7 +22,7 @@ logger = setup_logger(__name__)
 @router.post('/business', response_model=user_schema.UserVerRes, status_code=status.HTTP_201_CREATED)
 async def submit_business_verification(
     verification_data: user_schema.UserVer,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user),
     request: Request = None
 ):
@@ -30,14 +30,14 @@ async def submit_business_verification(
     logger.info(f"User {current_user.id} submitting business verification from {ip_address}")
 
     try:
-        verified = VerificationService.submit_business_verification(
+        verified = await VerificationService.submit_business_verification(
             db=db,
             current_user=current_user,
             verification_data=verification_data
         )
 
         merchant_id = current_user.merchant_info.merchant_id if hasattr(current_user, 'merchant_info') and current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="BUSINESS_VERIFICATION_SUBMITTED",
@@ -53,26 +53,27 @@ async def submit_business_verification(
                 "submitted_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"Business verification submitted successfully for user {current_user.id} - {verification_data.business_name}")
         return verified
 
     except UserAlreadyVerifiedError:
+        await db.rollback()
         logger.warning(f"User {current_user.id} attempted to submit verification when already verified")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Business verification already submitted"
         )
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Verification failed for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error during business verification for user {current_user.id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -82,7 +83,7 @@ async def submit_business_verification(
 
 @router.get('/business', response_model=user_schema.UserVerifiedInfoRes, status_code=status.HTTP_200_OK)
 async def get_business_verification_status(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user),
     request: Request = None
 ):
@@ -90,7 +91,7 @@ async def get_business_verification_status(
     logger.info(f"User {current_user.id} requesting business verification status from {ip_address}")
 
     try:
-        verification = VerificationService.get_business_verification_status(
+        verification = await VerificationService.get_business_verification_status(
             db=db,
             current_user=current_user
         )
@@ -103,7 +104,7 @@ async def get_business_verification_status(
             )
 
         merchant_id = current_user.merchant_info.merchant_id if hasattr(current_user, 'merchant_info') and current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="BUSINESS_VERIFICATION_STATUS_VIEWED",
@@ -118,7 +119,7 @@ async def get_business_verification_status(
                 "viewed_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"Business verification status retrieved for user {current_user.id} - {verification.get('business_name')} - Status: {verification.get('verification_status')}")
         return verification
@@ -142,7 +143,7 @@ async def get_business_verification_status(
 @router.put('/business', response_model=user_schema.UserVerifiedInfoRes, status_code=status.HTTP_200_OK)
 async def update_business_information(
     update_data: user_schema.UserUpdateVer,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: db_models.User = Depends(au.get_current_user),
     request: Request = None
 ):
@@ -150,14 +151,14 @@ async def update_business_information(
     logger.info(f"User {current_user.id} updating business information from {ip_address}")
 
     try:
-        updated_verification = VerificationService.update_business_information(
+        updated_verification = await VerificationService.update_business_information(
             db=db,
             current_user=current_user,
             update_data=update_data
         )
 
         merchant_id = current_user.merchant_info.merchant_id if hasattr(current_user, 'merchant_info') and current_user.merchant_info else None
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="BUSINESS_INFORMATION_UPDATED",
@@ -173,29 +174,29 @@ async def update_business_information(
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
 
         logger.info(f"Business information updated successfully for user {current_user.id}")
         return updated_verification
 
     except UserNotFoundError as e:
+        await db.rollback()
         logger.warning(f"User {current_user.id} attempted to update non-existent business verification")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating business information for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Unexpected error updating business information for user {current_user.id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not update business information"
         )
-
