@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from app.models.db_models import Charge, LedgerTransaction
+from app.models.payment import Charge
+from app.models.ledger import LedgerTransaction
 from app.schemas import merchant as mer_schema
 from app.services.merchant_service import MerchantService
 from app.services.payment_service import ChargeService

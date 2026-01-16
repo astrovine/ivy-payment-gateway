@@ -1,18 +1,28 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routers import authentication, account, charges, merchant, api_keys, kyc, verification, admin_router, payout_account, payouts, webhooks
 from app.routers import settlements
-from app.models import db_models
+from app.models.base import Base
 from app.utilities.config import settings
-from app.utilities.db_con import engine
+from app.utilities.db_con import engine, async_engine
 from app.middleware.logging_middleware import RequestLoggingMiddleware, SecurityLoggingMiddleware
 from app.utilities.logger import app_logger
 from app.celery_worker import celery_app
 
-db_models.Base.metadata.create_all(bind=engine)
-app = FastAPI(title="Payment Gateway API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app_logger.info("Payment Gateway starting up...")
+    Base.metadata.create_all(bind=engine)
+    yield
+    await async_engine.dispose()
+    app_logger.info("Payment Gateway shutting down...")
+
+
+app = FastAPI(title="Payment Gateway API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(SecurityLoggingMiddleware)
@@ -54,7 +64,7 @@ app.include_router(webhooks.router)
 app.include_router(settlements.router)
 from app.routers.notifications import router as notifications_router
 app.include_router(notifications_router)
+from app.routers.two_factor import router as two_factor_router
+app.include_router(two_factor_router)
 
 celery_app.autodiscover_tasks(['app'])
-
-app_logger.info("Payment Gateway started successfully")

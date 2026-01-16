@@ -1,7 +1,8 @@
 from decimal import Decimal
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import db_models
-from ..models.db_models import AccountType
+from ..models.enums import AccountType
 from ..utilities.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -9,116 +10,114 @@ logger = setup_logger(__name__)
 
 class BalanceService:
     @staticmethod
-    def recalculate_merchant_balance(db: Session, merchant_id: str):
-        """
-        Recalculate and update merchant balances based on ledger transactions
-        """
-        try:
-            logger.info(f"Recalculating balances for merchant {merchant_id}")
+    async def recalculate_merchant_available_balance(db: AsyncSession, merchant_id: str, currency: str) -> Decimal:
+        logger.info(f"Recalculating available balance for merchant {merchant_id}, currency {currency}")
 
-            merchant_account = db.query(db_models.MerchantAccount).filter_by(
-                merchant_id=merchant_id
-            ).first()
+        result = await db.execute(
+            select(db_models.Account)
+            .where(
+                db_models.Account.merchant_id == merchant_id,
+                db_models.Account.account_type == AccountType.MERCHANT_AVAILABLE,
+                db_models.Account.currency == currency
+            )
+        )
+        merchant_available_account = result.scalar_one_or_none()
 
-            if not merchant_account:
-                logger.error(f"Merchant account {merchant_id} not found")
-                return
+        if not merchant_available_account:
+            logger.warning(f"No MERCHANT_AVAILABLE account found for merchant {merchant_id}, currency {currency}")
+            return Decimal("0.0000")
 
-            pending_account = db.query(db_models.Account).filter_by(
-                merchant_id=merchant_id,
-                account_type=AccountType.MERCHANT_PENDING
-            ).first()
+        ledger_result = await db.execute(
+            select(func.coalesce(func.sum(db_models.LedgerTransaction.amount), 0))
+            .where(
+                db_models.LedgerTransaction.merchant_id == merchant_id,
+                db_models.LedgerTransaction.currency == currency,
+                db_models.LedgerTransaction.credit_account_id == merchant_available_account.id
+            )
+        )
+        credits = ledger_result.scalar() or Decimal("0")
 
-            available_account = db.query(db_models.Account).filter_by(
-                merchant_id=merchant_id,
-                account_type=AccountType.MERCHANT_AVAILABLE
-            ).first()
+        debit_result = await db.execute(
+            select(func.coalesce(func.sum(db_models.LedgerTransaction.amount), 0))
+            .where(
+                db_models.LedgerTransaction.merchant_id == merchant_id,
+                db_models.LedgerTransaction.currency == currency,
+                db_models.LedgerTransaction.debit_account_id == merchant_available_account.id
+            )
+        )
+        debits = debit_result.scalar() or Decimal("0")
 
-            if pending_account:
-                pending_credits = db.query(db_models.LedgerTransaction).filter(
-                    db_models.LedgerTransaction.merchant_id == merchant_id,
-                    db_models.LedgerTransaction.credit_account_id == pending_account.id
-                ).all()
+        calculated_balance = credits - debits
+        logger.info(f"Calculated balance for merchant {merchant_id}: credits={credits}, debits={debits}, balance={calculated_balance}")
 
-                pending_debits = db.query(db_models.LedgerTransaction).filter(
-                    db_models.LedgerTransaction.merchant_id == merchant_id,
-                    db_models.LedgerTransaction.debit_account_id == pending_account.id
-                ).all()
+        if merchant_available_account.balance != calculated_balance:
+            logger.warning(f"Balance mismatch for merchant {merchant_id}: stored={merchant_available_account.balance}, calculated={calculated_balance}")
+            merchant_available_account.balance = calculated_balance
+            await db.flush()
 
-                total_credits = sum(Decimal(str(t.amount)) for t in pending_credits)
-                total_debits = sum(Decimal(str(t.amount)) for t in pending_debits)
-
-                pending_account.balance = total_credits - total_debits
-                merchant_account.pending_balance = pending_account.balance
-
-                logger.info(f"Merchant {merchant_id} pending balance recalculated: {pending_account.balance}")
-
-            if available_account:
-                available_credits = db.query(db_models.LedgerTransaction).filter(
-                    db_models.LedgerTransaction.merchant_id == merchant_id,
-                    db_models.LedgerTransaction.credit_account_id == available_account.id
-                ).all()
-
-                available_debits = db.query(db_models.LedgerTransaction).filter(
-                    db_models.LedgerTransaction.merchant_id == merchant_id,
-                    db_models.LedgerTransaction.debit_account_id == available_account.id
-                ).all()
-
-                total_credits = sum(Decimal(str(t.amount)) for t in available_credits)
-                total_debits = sum(Decimal(str(t.amount)) for t in available_debits)
-
-                available_account.balance = total_credits - total_debits
-                merchant_account.available_balance = available_account.balance
-
-                logger.info(f"Merchant {merchant_id} available balance recalculated: {available_account.balance}")
-
-            db.commit()
-            logger.info(f"Balance recalculation complete for merchant {merchant_id}")
-
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error recalculating balance for merchant {merchant_id}: {e}", exc_info=True)
-            raise
+        return calculated_balance
 
     @staticmethod
-    def sync_balances_from_charges(db: Session, merchant_id: str):
-        """
-        Sync merchant balances based on actual charge statuses
-        """
-        try:
-            logger.info(f"Syncing balances from charges for merchant {merchant_id}")
+    async def sync_merchant_account_balance(db: AsyncSession, merchant_id: str) -> None:
+        logger.info(f"Syncing merchant account balance for {merchant_id}")
 
-            merchant_account = db.query(db_models.MerchantAccount).filter_by(
-                merchant_id=merchant_id
-            ).with_for_update().first()
+        merchant_result = await db.execute(
+            select(db_models.MerchantAccount).where(db_models.MerchantAccount.merchant_id == merchant_id)
+        )
+        merchant = merchant_result.scalar_one_or_none()
+        if not merchant:
+            logger.warning(f"Merchant {merchant_id} not found for balance sync")
+            return
 
-            if not merchant_account:
-                logger.error(f"Merchant account {merchant_id} not found")
-                return
+        available_result = await db.execute(
+            select(func.coalesce(func.sum(db_models.Account.balance), 0))
+            .where(
+                db_models.Account.merchant_id == merchant_id,
+                db_models.Account.account_type == AccountType.MERCHANT_AVAILABLE
+            )
+        )
+        available_sum = available_result.scalar() or Decimal("0")
 
-            user = db.query(db_models.User).filter_by(id=merchant_account.user_id).first()
-            if not user:
-                logger.error(f"User not found for merchant {merchant_id}")
-                return
+        pending_result = await db.execute(
+            select(func.coalesce(func.sum(db_models.Account.balance), 0))
+            .where(
+                db_models.Account.merchant_id == merchant_id,
+                db_models.Account.account_type == AccountType.MERCHANT_PENDING
+            )
+        )
+        pending_sum = pending_result.scalar() or Decimal("0")
 
-            succeeded_charges = db.query(db_models.Charge).filter(
-                db_models.Charge.user_id == user.id,
-                db_models.Charge.status == 'succeeded'
-            ).all()
+        if merchant.available_balance != available_sum:
+            logger.info(f"Updating merchant {merchant_id} available_balance: {merchant.available_balance} -> {available_sum}")
+            merchant.available_balance = available_sum
 
-            total_amount = sum(Decimal(str(c.amount)) for c in succeeded_charges)
-            fee_amount = total_amount * Decimal("0.02")
-            net_amount = total_amount - fee_amount
+        if merchant.pending_balance != pending_sum:
+            logger.info(f"Updating merchant {merchant_id} pending_balance: {merchant.pending_balance} -> {pending_sum}")
+            merchant.pending_balance = pending_sum
 
-            merchant_account.pending_balance = net_amount
-            merchant_account.available_balance = Decimal("0.00")
+        await db.flush()
+        logger.info(f"Balance sync complete for merchant {merchant_id}")
 
-            db.commit()
+    @staticmethod
+    async def get_charge_with_ledger(db: AsyncSession, charge_id: str):
+        charge_result = await db.execute(select(db_models.Charge).where(db_models.Charge.id == charge_id))
+        charge = charge_result.scalar_one_or_none()
 
-            logger.info(f"Balance sync complete for merchant {merchant_id}: pending={net_amount}, available=0.00")
+        if not charge:
+            return None
 
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error syncing balances for merchant {merchant_id}: {e}", exc_info=True)
-            raise
+        ledger_result = await db.execute(
+            select(db_models.LedgerTransaction)
+            .where(db_models.LedgerTransaction.charge_id == charge_id)
+            .order_by(db_models.LedgerTransaction.created_at)
+        )
+        ledger_entries = ledger_result.scalars().all()
 
+        user_result = await db.execute(select(db_models.User).where(db_models.User.id == charge.user_id))
+        user = user_result.scalar_one_or_none()
+
+        return {
+            "charge": charge,
+            "ledger_entries": list(ledger_entries),
+            "user": user
+        }

@@ -3,9 +3,9 @@ from typing import List
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from ..models import db_models
 from ..schemas import merchant as mer
@@ -22,12 +22,14 @@ from ..utilities.utils import hash_password
 
 logger = setup_logger(__name__)
 
+
 class MerchantService:
     @staticmethod
-    def create_merchant_account(db: Session, data: mer.MerchantAccountCreate, user_id: int) -> db_models.MerchantAccount:
+    async def create_merchant_account(db: AsyncSession, data: mer.MerchantAccountCreate, user_id: int) -> db_models.MerchantAccount:
         try:
             logger.info("Creating a new merchant account")
-            existing_account = db.query(db_models.MerchantAccount).filter_by(user_id=user_id).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            existing_account = result.scalar_one_or_none()
             if existing_account:
                 logger.warning(f'Merchant account {existing_account.id} already exists')
                 raise DatabaseError('Merchant account already exists')
@@ -40,25 +42,20 @@ class MerchantService:
                 settlement_schedule=data.settlement_schedule
             )
             db.add(new_merchant)
-            db.commit()
-            new_limit = db_models.TransactionLimit(
-                merchant_id=mer_id
-            )
+            await db.commit()
+
+            new_limit = db_models.TransactionLimit(merchant_id=mer_id)
             db.add(new_limit)
-            db.commit()
+            await db.commit()
 
-
-            new_fee = db_models.FeeStructure(
-                merchant_id=mer_id
-            )
+            new_fee = db_models.FeeStructure(merchant_id=mer_id)
             db.add(new_fee)
-            db.commit()
+            await db.commit()
 
-            new_settings = db_models.MerchantSettings(
-                merchant_id=mer_id
-            )
+            new_settings = db_models.MerchantSettings(merchant_id=mer_id)
             db.add(new_settings)
-            db.commit()
+            await db.commit()
+
             pending_account = db_models.Account(
                 merchant_id=mer_id,
                 account_type=db_models.AccountType.MERCHANT_PENDING,
@@ -66,7 +63,7 @@ class MerchantService:
                 balance=0
             )
             db.add(pending_account)
-            db.commit()
+            await db.commit()
 
             available_account = db_models.Account(
                 merchant_id=mer_id,
@@ -75,51 +72,48 @@ class MerchantService:
                 balance=0
             )
             db.add(available_account)
-            db.commit()
+            await db.commit()
 
-            db.flush()
-            db.refresh(new_merchant)
+            await db.flush()
+            await db.refresh(new_merchant)
             logger.info(f'Merchant created successfully: {new_merchant.id}')
             return new_merchant
 
         except DatabaseError as e:
-            db.rollback()
+            await db.rollback()
             logger.warning(f"Duplicate merchant check failed: {e}")
             raise e
-
         except IntegrityError as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"IntegrityError: {e} while creating new merchant")
             raise UserCreationError(f"IntegrityError: {e} while creating new merchant")
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while creating new merchant")
             raise MerchantCreationError(f"Exception: {e} while creating new merchant")
 
-
     @staticmethod
-    def get_merchant_account(db: Session, user_id: int) -> db_models.MerchantAccount:
+    async def get_merchant_account(db: AsyncSession, user_id: int) -> db_models.MerchantAccount:
         try:
             logger.info(f"Getting a merchant account by mer_id: {user_id}")
-            merchant = db.query(db_models.MerchantAccount).filter(db_models.MerchantAccount.user_id == user_id).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
             if not merchant:
                 logger.warning(f"Merchant account not found: {user_id}")
                 raise MerchantAccountNotFoundError(reason='No merchant with that id was found')
-            else:
-                return merchant
+            return merchant
+        except MerchantAccountNotFoundError:
+            raise
         except Exception as e:
             logger.error(f"Exception: {e} while getting a merchant account")
             raise DatabaseError()
 
     @staticmethod
-    def update_merchant_account(db: Session, user_id: int,
-                                data: mer.MerchantAccountUpdate) -> db_models.MerchantAccount:
-
+    async def update_merchant_account(db: AsyncSession, user_id: int, data: mer.MerchantAccountUpdate) -> db_models.MerchantAccount:
         try:
             logger.info(f"Merchant account update initiated for user_id: {user_id}")
-
-            merchant_query = db.query(db_models.MerchantAccount).filter(db_models.MerchantAccount.user_id == user_id)
-            db_merchant = merchant_query.first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            db_merchant = result.scalar_one_or_none()
 
             if not db_merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
@@ -128,9 +122,11 @@ class MerchantService:
             if not update_dict:
                 logger.info(f"No update data provided for user_id: {user_id}")
                 return db_merchant
-            merchant_query.update(update_dict, synchronize_session=False)
-            db.flush()
-            db.refresh(db_merchant)
+
+            for key, value in update_dict.items():
+                setattr(db_merchant, key, value)
+            await db.flush()
+            await db.refresh(db_merchant)
 
             logger.info(f'Merchant account updated successfully for user_id: {user_id}')
             return db_merchant
@@ -138,35 +134,39 @@ class MerchantService:
         except MerchantAccountNotFoundError:
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while updating merchant account for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Exception: {e} while updating a merchant account")
 
-
     @staticmethod
-    def get_merchant_balance(db: Session, user_id: int) -> mer.MerchantBalanceRes:
+    async def get_merchant_balance(db: AsyncSession, user_id: int) -> mer.MerchantBalanceRes:
         try:
             logger.info(f"Getting a merchant account balance for user_id: {user_id}")
-            merchant = db.query(db_models.MerchantAccount).filter(db_models.MerchantAccount.user_id == user_id).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError(reason='No merchant with that id was found')
 
-            pending_sum = db.query(func.coalesce(func.sum(db_models.Account.balance), 0)).filter(
-                db_models.Account.merchant_id == merchant.merchant_id,
-                db_models.Account.account_type == db_models.AccountType.MERCHANT_PENDING
-            ).scalar()
+            pending_result = await db.execute(
+                select(func.coalesce(func.sum(db_models.Account.balance), 0)).where(
+                    db_models.Account.merchant_id == merchant.merchant_id,
+                    db_models.Account.account_type == db_models.AccountType.MERCHANT_PENDING
+                )
+            )
+            pending_sum = pending_result.scalar()
 
-            available_sum = db.query(func.coalesce(func.sum(db_models.Account.balance), 0)).filter(
-                db_models.Account.merchant_id == merchant.merchant_id,
-                db_models.Account.account_type == db_models.AccountType.MERCHANT_AVAILABLE
-            ).scalar()
+            available_result = await db.execute(
+                select(func.coalesce(func.sum(db_models.Account.balance), 0)).where(
+                    db_models.Account.merchant_id == merchant.merchant_id,
+                    db_models.Account.account_type == db_models.AccountType.MERCHANT_AVAILABLE
+                )
+            )
+            available_sum = available_result.scalar()
 
             reserved_balance = merchant.reserved_balance if getattr(merchant, 'reserved_balance', None) is not None else Decimal("0.0000")
 
-            logger.info(
-                f"Balances for merchant {merchant.merchant_id}: pending={pending_sum}, available={available_sum}, reserved={reserved_balance}"
-            )
+            logger.info(f"Balances for merchant {merchant.merchant_id}: pending={pending_sum}, available={available_sum}, reserved={reserved_balance}")
 
             return mer.MerchantBalanceRes(
                 available_balance=available_sum,
@@ -181,80 +181,59 @@ class MerchantService:
             raise DatabaseError(f"Exception: {e} while getting a merchant account balance")
 
     @staticmethod
-    def get_merchant_balance_history(db: Session, merchant_id: str) -> List[db_models.LedgerTransaction]:
+    async def get_merchant_balance_history(db: AsyncSession, merchant_id: str) -> List[db_models.LedgerTransaction]:
         try:
             logger.info(f"Getting a merchant account balance history for mer_id: {merchant_id}")
-
-            balance_hist = db.query(db_models.LedgerTransaction).filter(
-                db_models.LedgerTransaction.merchant_id == merchant_id
-            ).order_by(db_models.LedgerTransaction.created_at.desc()).all()
+            result = await db.execute(
+                select(db_models.LedgerTransaction)
+                .where(db_models.LedgerTransaction.merchant_id == merchant_id)
+                .order_by(db_models.LedgerTransaction.created_at.desc())
+            )
+            balance_hist = result.scalars().all()
 
             if not balance_hist:
                 logger.warning(f"No balance history was found for mer_id: {merchant_id}'s account")
                 return []
-
-            return balance_hist
-
+            return list(balance_hist)
         except Exception as e:
             logger.error(f"Exception: {e} while getting a merchant account balance history")
             raise DatabaseError(f"Exception: {e} while getting a merchant account balance history")
 
     @staticmethod
-    def update_limits(db: Session, merchant_id: str, limits_data: mer.TransactionLimits):
-        """Update transaction limits for a merchant."""
-        limit_query = db.query(db_models.TransactionLimit).filter(
-            db_models.TransactionLimit.merchant_id == merchant_id
-        )
-        db_limit = limit_query.first()
+    async def update_limits(db: AsyncSession, merchant_id: str, limits_data: mer.TransactionLimits):
+        result = await db.execute(select(db_models.TransactionLimit).where(db_models.TransactionLimit.merchant_id == merchant_id))
+        db_limit = result.scalar_one_or_none()
         if not db_limit:
             return None
 
         update_data = limits_data.model_dump(exclude_unset=True)
         if update_data:
-            limit_query.update(update_data, synchronize_session=False)
-            db.flush()
-            db.refresh(db_limit)
+            for key, value in update_data.items():
+                setattr(db_limit, key, value)
+            await db.flush()
+            await db.refresh(db_limit)
         return db_limit
 
     @staticmethod
-    def get_fee_structure(db: Session, user_id: int) -> db_models.FeeStructure:
-        """
-        Get fee structure for a merchant account.
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account and fee structure for
-
-        Returns:
-            FeeStructure object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            DatabaseError: If any database error occurs
-        """
+    async def get_fee_structure(db: AsyncSession, user_id: int) -> db_models.FeeStructure:
         try:
             logger.info(f"Getting fee structure for user_id: {user_id}")
-
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
-            fee_structure = db.query(db_models.FeeStructure).filter(
-                db_models.FeeStructure.merchant_id == merchant.merchant_id
-            ).first()
+            fee_result = await db.execute(select(db_models.FeeStructure).where(db_models.FeeStructure.merchant_id == merchant.merchant_id))
+            fee_structure = fee_result.scalar_one_or_none()
 
             if not fee_structure:
                 logger.warning(f"Fee structure not found for merchant_id: {merchant.merchant_id}, creating default")
-                fee_structure = db_models.FeeStructure(
-                    merchant_id=merchant.merchant_id
-                )
+                fee_structure = db_models.FeeStructure(merchant_id=merchant.merchant_id)
                 db.add(fee_structure)
-                db.flush()
-                db.refresh(fee_structure)
+                await db.flush()
+                await db.refresh(fee_structure)
                 logger.info(f"Created default fee structure for merchant_id: {merchant.merchant_id}")
 
             logger.info(f"Successfully retrieved fee structure for merchant_id: {merchant.merchant_id}")
@@ -267,45 +246,25 @@ class MerchantService:
             raise DatabaseError(f"Failed to retrieve fee structure: {str(e)}")
 
     @staticmethod
-    def get_merchant_settings(db: Session, user_id: int) -> db_models.MerchantSettings:
-        """
-        Get merchant settings for a merchant account.
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account and settings for
-
-        Returns:
-            MerchantSettings object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            DatabaseError: If any database error occurs
-        """
+    async def get_merchant_settings(db: AsyncSession, user_id: int) -> db_models.MerchantSettings:
         try:
             logger.info(f"Getting merchant settings for user_id: {user_id}")
-
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
-            settings = db.query(db_models.MerchantSettings).filter(
-                db_models.MerchantSettings.merchant_id == merchant.merchant_id
-            ).first()
-
+            settings_result = await db.execute(select(db_models.MerchantSettings).where(db_models.MerchantSettings.merchant_id == merchant.merchant_id))
+            settings = settings_result.scalar_one_or_none()
 
             if not settings:
                 logger.warning(f"Merchant settings not found for merchant_id: {merchant.merchant_id}, creating defaults")
-                settings = db_models.MerchantSettings(
-                    merchant_id=merchant.merchant_id
-                )
+                settings = db_models.MerchantSettings(merchant_id=merchant.merchant_id)
                 db.add(settings)
-                db.flush()
-                db.refresh(settings)
+                await db.flush()
+                await db.refresh(settings)
                 logger.info(f"Created default merchant settings for merchant_id: {merchant.merchant_id}")
 
             logger.info(f"Successfully retrieved merchant settings for merchant_id: {merchant.merchant_id}")
@@ -318,46 +277,24 @@ class MerchantService:
             raise DatabaseError(f"Failed to retrieve merchant settings: {str(e)}")
 
     @staticmethod
-    def update_merchant_settings(db: Session, user_id: int, settings_data: mer.MerchantSettings) -> db_models.MerchantSettings:
-        """
-        Update merchant settings for a merchant account.
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            settings_data: MerchantSettings schema with updated values
-
-        Returns:
-            Updated MerchantSettings object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            DatabaseError: If any database error occurs
-        """
+    async def update_merchant_settings(db: AsyncSession, user_id: int, settings_data: mer.MerchantSettings) -> db_models.MerchantSettings:
         try:
             logger.info(f"Updating merchant settings for user_id: {user_id}")
-
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
-            settings_query = db.query(db_models.MerchantSettings).filter(
-                db_models.MerchantSettings.merchant_id == merchant.merchant_id
-            )
-
-            db_settings = settings_query.first()
+            settings_result = await db.execute(select(db_models.MerchantSettings).where(db_models.MerchantSettings.merchant_id == merchant.merchant_id))
+            db_settings = settings_result.scalar_one_or_none()
 
             if not db_settings:
                 logger.warning(f"Merchant settings not found for merchant_id: {merchant.merchant_id}, creating with provided data")
-                db_settings = db_models.MerchantSettings(
-                    merchant_id=merchant.merchant_id
-                )
+                db_settings = db_models.MerchantSettings(merchant_id=merchant.merchant_id)
                 db.add(db_settings)
-                db.flush()
+                await db.flush()
                 logger.info(f"Created merchant settings for merchant_id: {merchant.merchant_id}")
 
             update_data = settings_data.model_dump(exclude_unset=True)
@@ -369,14 +306,12 @@ class MerchantService:
             if update_data:
                 for key, value in update_data.items():
                     setattr(db_settings, key, value)
-
-                db.flush()
-                db.refresh(db_settings)
+                await db.flush()
+                await db.refresh(db_settings)
                 logger.info(f"Successfully updated merchant settings for merchant_id: {merchant.merchant_id}")
             else:
-
                 if not db_settings.id:
-                    db.flush()
+                    await db.flush()
                 logger.info(f"No valid fields to update for merchant_id: {merchant.merchant_id}")
 
             return db_settings
@@ -384,44 +319,23 @@ class MerchantService:
         except MerchantAccountNotFoundError:
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while updating merchant settings for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Failed to update merchant settings: {str(e)}")
 
-
     @staticmethod
-    def create_api_key(db: Session, user_id: int, key_data: api_key_schema.APIKeyCreate) -> tuple[db_models.APIKey, str]:
-        """
-        Create a new API key for a merchant.
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            key_data: APIKeyCreate schema with key details
-
-        Returns:
-            Tuple of (APIKey object, raw_key_string)
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            DatabaseError: If any database error occurs
-        """
+    async def create_api_key(db: AsyncSession, user_id: int, key_data: api_key_schema.APIKeyCreate) -> tuple[db_models.APIKey, str]:
         try:
             logger.info(f"Creating API key for user_id: {user_id}")
-
-            # Get the merchant account
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
             prefix = f"{'pk' if key_data.key_type == 'publishable' else 'sk'}_{key_data.environment}_"
-
             raw_key = prefix + secrets.token_urlsafe(32)
-
             hashed_key = hash_password(raw_key)
 
             new_key = db_models.APIKey(
@@ -435,54 +349,39 @@ class MerchantService:
             )
 
             db.add(new_key)
-            db.flush()
-            db.refresh(new_key)
+            await db.flush()
+            await db.refresh(new_key)
 
             logger.info(f"Created API key {new_key.id} ({key_data.key_type}/{key_data.environment}) for merchant {merchant.merchant_id}")
-
             return new_key, raw_key
 
         except MerchantAccountNotFoundError:
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while creating API key for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Failed to create API key: {str(e)}")
 
     @staticmethod
-    def get_api_keys(db: Session, user_id: int) -> List[db_models.APIKey]:
-        """
-        Get all API keys for a merchant (excluding revoked keys by default).
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-
-        Returns:
-            List of APIKey objects
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            DatabaseError: If any database error occurs
-        """
+    async def get_api_keys(db: AsyncSession, user_id: int) -> List[db_models.APIKey]:
         try:
             logger.info(f"Getting API keys for user_id: {user_id}")
-
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
-            api_keys = db.query(db_models.APIKey).filter(
-                db_models.APIKey.merchant_id == merchant.merchant_id,
-                db_models.APIKey.is_active == True
-            ).order_by(db_models.APIKey.created_at.desc()).all()
+            keys_result = await db.execute(
+                select(db_models.APIKey)
+                .where(db_models.APIKey.merchant_id == merchant.merchant_id, db_models.APIKey.is_active == True)
+                .order_by(db_models.APIKey.created_at.desc())
+            )
+            api_keys = keys_result.scalars().all()
 
             logger.info(f"Retrieved {len(api_keys)} API keys for merchant {merchant.merchant_id}")
-            return api_keys
+            return list(api_keys)
 
         except MerchantAccountNotFoundError:
             raise
@@ -491,38 +390,20 @@ class MerchantService:
             raise DatabaseError(f"Failed to retrieve API keys: {str(e)}")
 
     @staticmethod
-    def get_api_key_by_id(db: Session, user_id: int, key_id: int) -> db_models.APIKey:
-        """
-        Get a specific API key by ID.
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            key_id: API key ID
-
-        Returns:
-            APIKey object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            ResourceNotFoundError: If API key is not found
-            DatabaseError: If any database error occurs
-        """
+    async def get_api_key_by_id(db: AsyncSession, user_id: int, key_id: int) -> db_models.APIKey:
         try:
             logger.info(f"Getting API key {key_id} for user_id: {user_id}")
-
-            merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == user_id
-            ).first()
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user_id))
+            merchant = result.scalar_one_or_none()
 
             if not merchant:
                 logger.warning(f"Merchant account not found for user_id: {user_id}")
                 raise MerchantAccountNotFoundError("Merchant account not found. Please create one first.")
 
-            api_key = db.query(db_models.APIKey).filter(
-                db_models.APIKey.id == key_id,
-                db_models.APIKey.merchant_id == merchant.merchant_id
-            ).first()
+            key_result = await db.execute(
+                select(db_models.APIKey).where(db_models.APIKey.id == key_id, db_models.APIKey.merchant_id == merchant.merchant_id)
+            )
+            api_key = key_result.scalar_one_or_none()
 
             if not api_key:
                 logger.warning(f"API key {key_id} not found for merchant {merchant.merchant_id}")
@@ -538,67 +419,28 @@ class MerchantService:
             raise DatabaseError(f"Failed to retrieve API key: {str(e)}")
 
     @staticmethod
-    def update_api_key(db: Session, user_id: int, key_id: int, update_data: api_key_schema.APIKeyUpdate) -> db_models.APIKey:
-        """
-        Update an API key (name only - keys themselves are immutable).
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            key_id: API key ID
-            update_data: APIKeyUpdate schema with new name
-
-        Returns:
-            Updated APIKey object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            ResourceNotFoundError: If API key is not found
-            DatabaseError: If any database error occurs
-        """
+    async def update_api_key(db: AsyncSession, user_id: int, key_id: int, update_data: api_key_schema.APIKeyUpdate) -> db_models.APIKey:
         try:
             logger.info(f"Updating API key {key_id} for user_id: {user_id}")
-
-            api_key = MerchantService.get_api_key_by_id(db, user_id, key_id)
-
+            api_key = await MerchantService.get_api_key_by_id(db, user_id, key_id)
             api_key.name = update_data.name
-
-            db.flush()
-            db.refresh(api_key)
-
+            await db.flush()
+            await db.refresh(api_key)
             logger.info(f"Updated API key {key_id} name to '{update_data.name}'")
             return api_key
 
         except (MerchantAccountNotFoundError, ResourceNotFoundError):
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while updating API key {key_id} for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Failed to update API key: {str(e)}")
 
     @staticmethod
-    def revoke_api_key(db: Session, user_id: int, key_id: int, reason: str = None) -> db_models.APIKey:
-        """
-        Revoke an API key (soft delete - marks as inactive).
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            key_id: API key ID
-            reason: Optional reason for revocation
-
-        Returns:
-            Revoked APIKey object
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            ResourceNotFoundError: If API key is not found
-            DatabaseError: If any database error occurs
-        """
+    async def revoke_api_key(db: AsyncSession, user_id: int, key_id: int, reason: str = None) -> db_models.APIKey:
         try:
             logger.info(f"Revoking API key {key_id} for user_id: {user_id}")
-
-            api_key = MerchantService.get_api_key_by_id(db, user_id, key_id)
+            api_key = await MerchantService.get_api_key_by_id(db, user_id, key_id)
 
             if not api_key.is_active:
                 logger.warning(f"API key {key_id} is already revoked")
@@ -608,8 +450,8 @@ class MerchantService:
             api_key.revoked_at = datetime.now(timezone.utc)
             api_key.revoke_reason = reason
 
-            db.flush()
-            db.refresh(api_key)
+            await db.flush()
+            await db.refresh(api_key)
 
             logger.info(f"Revoked API key {key_id} - Reason: {reason or 'Not specified'}")
             return api_key
@@ -617,49 +459,33 @@ class MerchantService:
         except (MerchantAccountNotFoundError, ResourceNotFoundError):
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while revoking API key {key_id} for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Failed to revoke API key: {str(e)}")
 
     @staticmethod
-    def roll_api_key(db: Session, user_id: int, key_id: int) -> tuple[db_models.APIKey, str]:
-        """
-        Roll/regenerate an API key (creates new key with same settings, revokes old one).
-
-        Args:
-            db: Database session
-            user_id: User ID to get merchant account for
-            key_id: API key ID to roll
-
-        Returns:
-            Tuple of (new APIKey object, raw_key_string)
-
-        Raises:
-            MerchantAccountNotFoundError: If merchant account is not found
-            ResourceNotFoundError: If API key is not found
-            DatabaseError: If any database error occurs
-        """
+    async def roll_api_key(db: AsyncSession, user_id: int, key_id: int) -> tuple[db_models.APIKey, str]:
         try:
             logger.info(f"Rolling API key {key_id} for user_id: {user_id}")
-
-            old_key = MerchantService.get_api_key_by_id(db, user_id, key_id)
+            old_key = await MerchantService.get_api_key_by_id(db, user_id, key_id)
 
             if not old_key.is_active:
                 logger.warning(f"Cannot roll revoked API key {key_id}")
                 raise DatabaseError("Cannot roll a revoked API key")
+
             new_key_data = api_key_schema.APIKeyCreate(
                 name=f"{old_key.name} (rolled)",
                 key_type=old_key.key_type,
                 environment=old_key.environment
             )
 
-            new_key, raw_key = MerchantService.create_api_key(db, user_id, new_key_data)
+            new_key, raw_key = await MerchantService.create_api_key(db, user_id, new_key_data)
 
             old_key.is_active = False
             old_key.revoked_at = datetime.now(timezone.utc)
             old_key.revoke_reason = f"Rolled to new key (ID: {new_key.id})"
 
-            db.flush()
+            await db.flush()
 
             logger.info(f"Rolled API key {key_id} to new key {new_key.id}")
             return new_key, raw_key
@@ -667,6 +493,6 @@ class MerchantService:
         except (MerchantAccountNotFoundError, ResourceNotFoundError):
             raise
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Exception: {e} while rolling API key {key_id} for user_id: {user_id}", exc_info=True)
             raise DatabaseError(f"Failed to roll API key: {str(e)}")

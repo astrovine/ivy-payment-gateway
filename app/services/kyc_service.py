@@ -3,7 +3,8 @@ import cloudinary
 import cloudinary.uploader
 from cloudinary.exceptions import Error as CloudinaryError
 from fastapi import UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import kyc
 from ..models import db_models
 from ..utilities.exceptions import MerchantAccountNotFoundError, PermissionDeniedError, \
@@ -15,31 +16,30 @@ logger = setup_logger(__name__)
 
 class KycService:
     @staticmethod
-    def upload_kyc_documents(
-            db: Session,
+    async def upload_kyc_documents(
+            db: AsyncSession,
             document_data: kyc.KYCDocumentUpload,
             file: UploadFile,
             merchant: db_models.MerchantAccount
     ):
         try:
-            logger.info(
-                f'Processing KYC document upload for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, File: {document_data.file_name}')
-            db_merchant = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.merchant_id == merchant.merchant_id
-            ).first()
+            logger.info(f'Processing KYC document upload for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, File: {document_data.file_name}')
+
+            result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.merchant_id == merchant.merchant_id))
+            db_merchant = result.scalar_one_or_none()
 
             if not db_merchant:
                 logger.warning(f'Merchant account {merchant.merchant_id} not found during KYC document upload')
                 raise MerchantAccountNotFoundError
 
-            existing_doc = db.query(db_models.KYCDocument).filter(
-                db_models.KYCDocument.user_id == db_merchant.user_id,
-                db_models.KYCDocument.document_type == document_data.document_type
-            ).first()
+            existing_result = await db.execute(
+                select(db_models.KYCDocument)
+                .where(db_models.KYCDocument.user_id == db_merchant.user_id, db_models.KYCDocument.document_type == document_data.document_type)
+            )
+            existing_doc = existing_result.scalar_one_or_none()
 
             if existing_doc:
-                logger.warning(
-                    f'KYC document type {document_data.document_type} already exists for merchant {merchant.merchant_id} (user ID: {db_merchant.user_id})')
+                logger.warning(f'KYC document type {document_data.document_type} already exists for merchant {merchant.merchant_id} (user ID: {db_merchant.user_id})')
                 raise PermissionDeniedError("Document type already uploaded.")
 
             logger.info(f'Uploading file to Cloudinary for merchant {merchant.merchant_id}')
@@ -51,11 +51,9 @@ class KycService:
 
             file_url = upload_result.get("secure_url")
             if not file_url:
-                logger.error(
-                    f"Cloudinary upload succeeded but no secure_url returned for merchant {merchant.merchant_id}")
+                logger.error(f"Cloudinary upload succeeded but no secure_url returned for merchant {merchant.merchant_id}")
                 raise CloudinaryError("Upload succeeded but no secure_url returned.")
-            logger.info(
-                f"KYC file successfully uploaded to Cloudinary for merchant {db_merchant.merchant_id}: {file_url}")
+            logger.info(f"KYC file successfully uploaded to Cloudinary for merchant {db_merchant.merchant_id}: {file_url}")
 
             new_document = db_models.KYCDocument(
                 user_id=db_merchant.user_id,
@@ -68,94 +66,95 @@ class KycService:
             )
             db.add(new_document)
 
-            kyc_status = db.query(db_models.KYCVerification).filter_by(
-                user_id=db_merchant.user_id
-            ).first()
+            kyc_result = await db.execute(select(db_models.KYCVerification).where(db_models.KYCVerification.user_id == db_merchant.user_id))
+            kyc_status = kyc_result.scalar_one_or_none()
 
             if not kyc_status:
-                logger.info(
-                    f'Creating new KYC verification record with not_started status for user {db_merchant.user_id}')
+                logger.info(f'Creating new KYC verification record with not_started status for user {db_merchant.user_id}')
                 kyc_status = db_models.KYCVerification(
                     user_id=db_merchant.user_id,
                     kyc_status=db_models.KYCStatus.not_started
                 )
                 db.add(kyc_status)
 
-            db.commit()
-            db.refresh(new_document)
-            logger.info(
-                f"KYC document {new_document.id} successfully saved to database - Type: {document_data.document_type}, File: {document_data.file_name}, Merchant: {merchant.merchant_id}, User: {db_merchant.user_id}")
+            await db.commit()
+            await db.refresh(new_document)
+            logger.info(f"KYC document {new_document.id} successfully saved to database - Type: {document_data.document_type}, File: {document_data.file_name}, Merchant: {merchant.merchant_id}, User: {db_merchant.user_id}")
 
             return new_document
 
         except CloudinaryError as e:
-            db.rollback()
-            logger.error(
-                f"Cloudinary upload failed for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, Error: {e}")
+            await db.rollback()
+            logger.error(f"Cloudinary upload failed for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, Error: {e}")
             raise VerificationError(reason="File upload provider error.")
         except (MerchantAccountNotFoundError, PermissionDeniedError) as e:
-            db.rollback()
+            await db.rollback()
             logger.warning(f'KYC upload failed for merchant {merchant.merchant_id} - {type(e).__name__}: {e}')
             raise e
         except Exception as e:
-            db.rollback()
-            logger.error(
-                f'Unexpected error during KYC document upload for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, Error: {e}',
-                exc_info=True)
+            await db.rollback()
+            logger.error(f'Unexpected error during KYC document upload for merchant {merchant.merchant_id} - Document type: {document_data.document_type}, Error: {e}', exc_info=True)
             raise e
 
     @staticmethod
-    def get_kyc_document_by_id(db: Session, document_id: int, user: db_models.User) -> db_models.KYCDocument:
+    async def get_kyc_document_by_id(db: AsyncSession, document_id: int, user: db_models.User) -> db_models.KYCDocument:
         logger.info(f'User {user.id} ({user.email}) attempting to retrieve KYC document {document_id}')
-        document = db.query(db_models.KYCDocument).filter(
-            db_models.KYCDocument.id == document_id,
-            db_models.KYCDocument.user_id == user.id
-        ).first()
+        result = await db.execute(
+            select(db_models.KYCDocument)
+            .where(db_models.KYCDocument.id == document_id, db_models.KYCDocument.user_id == user.id)
+        )
+        document = result.scalar_one_or_none()
         if not document:
             logger.warning(f'KYC document {document_id} not found or access denied for user {user.id} ({user.email})')
             raise KYCRequiredError("Document not found")
         return document
 
     @staticmethod
-    def delete_kyc_document(db: Session, document_id: int, user: db_models.User):
+    async def delete_kyc_document(db: AsyncSession, document_id: int, user: db_models.User):
         logger.info(f'{user.email} attempting to delete KYC document {document_id}')
 
-        document = db.query(db_models.KYCDocument).filter(
-            db_models.KYCDocument.id == document_id,
-            db_models.KYCDocument.user_id == user.id
-        ).first()
+        result = await db.execute(
+            select(db_models.KYCDocument)
+            .where(db_models.KYCDocument.id == document_id, db_models.KYCDocument.user_id == user.id)
+        )
+        document = result.scalar_one_or_none()
 
         if not document:
             logger.warning(f'KYC document {document_id} not found for deletion by user {user.id}')
             raise KYCRequiredError("Document not found")
 
-        db.delete(document)
-        db.commit()
+        await db.delete(document)
+        await db.commit()
         logger.info(f'KYC document {document_id} deleted by user {user.id}')
 
     @staticmethod
-    def submit_kyc_for_review(db: Session, user: db_models.User, document_ids: list[int]):
+    async def submit_kyc_for_review(db: AsyncSession, user: db_models.User, document_ids: list[int]):
         try:
             logger.info(f'User {user.id} ({user.email}) submitting KYC for review with document IDs: {document_ids}')
 
-            documents = db.query(db_models.KYCDocument).filter(
-                db_models.KYCDocument.user_id == user.id,
-                db_models.KYCDocument.id.in_(document_ids)
-            ).all()
+            result = await db.execute(
+                select(db_models.KYCDocument)
+                .where(db_models.KYCDocument.user_id == user.id, db_models.KYCDocument.id.in_(document_ids))
+            )
+            documents = result.scalars().all()
 
             if len(documents) != len(document_ids):
-                logger.warning(
-                    f'Some documents not found for user {user.id}. Requested: {document_ids}, Found: {[d.id for d in documents]}')
+                logger.warning(f'Some documents not found for user {user.id}. Requested: {document_ids}, Found: {[d.id for d in documents]}')
                 raise VerificationError("Some documents not found")
 
-            identity = db.query(db_models.IdentityVerification).filter_by(user_id=user.id).first()
-            business = db.query(db_models.BusinessVerification).filter_by(user_id=user.id).first()
+            identity_result = await db.execute(select(db_models.IdentityVerification).where(db_models.IdentityVerification.user_id == user.id))
+            identity = identity_result.scalar_one_or_none()
+
+            business_result = await db.execute(select(db_models.BusinessVerification).where(db_models.BusinessVerification.user_id == user.id))
+            business = business_result.scalar_one_or_none()
 
             if not identity or not business:
                 logger.warning(f'KYC submission failed for user {user.id}: Missing identity or business information.')
                 raise VerificationError("Missing required identity or business information.")
 
-            kyc_verification = db.query(db_models.KYCVerification).filter_by(user_id=user.id).first()
+            kyc_result = await db.execute(select(db_models.KYCVerification).where(db_models.KYCVerification.user_id == user.id))
+            kyc_verification = kyc_result.scalar_one_or_none()
+
             if not kyc_verification:
                 kyc_verification = db_models.KYCVerification(
                     user_id=user.id,
@@ -167,25 +166,27 @@ class KycService:
                 kyc_verification.kyc_status = db_models.KYCStatus.pending
                 kyc_verification.submitted_at = datetime.now()
 
-            merchant = db.query(db_models.MerchantAccount).filter_by(user_id=user.id).first()
+            merchant_result = await db.execute(select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == user.id))
+            merchant = merchant_result.scalar_one_or_none()
             if merchant:
                 merchant.kyc_status = db_models.KYCStatus.pending
                 logger.info(f'Updated merchant {merchant.merchant_id} KYC status to pending')
 
-            db.commit()
-            db.refresh(kyc_verification)
+            await db.commit()
+            await db.refresh(kyc_verification)
             logger.info(f'KYC submitted for review successfully for user {user.id}')
             return kyc_verification
 
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f'Error submitting KYC for user {user.id}: {e}', exc_info=True)
             raise
 
     @staticmethod
-    def get_kyc_status(db: Session, user: db_models.User):
+    async def get_kyc_status(db: AsyncSession, user: db_models.User):
         logger.info(f'Fetching KYC status for user {user.id} ({user.email})')
-        kyc_verification = db.query(db_models.KYCVerification).filter_by(user_id=user.id).first()
+        result = await db.execute(select(db_models.KYCVerification).where(db_models.KYCVerification.user_id == user.id))
+        kyc_verification = result.scalar_one_or_none()
 
         if not kyc_verification:
             logger.info(f'No KYC verification found for user {user.id}, returning default status')
@@ -205,17 +206,21 @@ class KycService:
             "submitted_at": kyc_verification.submitted_at,
             "verified_at": kyc_verification.verified_at,
             "rejection_reason": kyc_verification.rejection_reason,
-            "required_actions": kyc_verification.required_actions.split(
-                ',') if kyc_verification.required_actions else None
+            "required_actions": kyc_verification.required_actions.split(',') if kyc_verification.required_actions else None
         }
 
     @staticmethod
-    def get_required_actions(db: Session, user: db_models.User):
+    async def get_required_actions(db: AsyncSession, user: db_models.User):
         logger.info(f'Fetching required KYC actions for user {user.id}')
 
-        documents = db.query(db_models.KYCDocument).filter_by(user_id=user.id).all()
-        identity = db.query(db_models.IdentityVerification).filter_by(user_id=user.id).first()
-        business = db.query(db_models.BusinessVerification).filter_by(user_id=user.id).first()
+        docs_result = await db.execute(select(db_models.KYCDocument).where(db_models.KYCDocument.user_id == user.id))
+        documents = docs_result.scalars().all()
+
+        identity_result = await db.execute(select(db_models.IdentityVerification).where(db_models.IdentityVerification.user_id == user.id))
+        identity = identity_result.scalar_one_or_none()
+
+        business_result = await db.execute(select(db_models.BusinessVerification).where(db_models.BusinessVerification.user_id == user.id))
+        business = business_result.scalar_one_or_none()
 
         actions = []
 
@@ -235,9 +240,10 @@ class KycService:
         return {"required_actions": actions}
 
     @staticmethod
-    def create_or_update_identity(db: Session, user_id: int, data: kyc.IdentityVerification):
+    async def create_or_update_identity(db: AsyncSession, user_id: int, data: kyc.IdentityVerification):
         logger.info(f'Creating or updating identity verification for user {user_id}')
-        identity = db.query(db_models.IdentityVerification).filter_by(user_id=user_id).first()
+        result = await db.execute(select(db_models.IdentityVerification).where(db_models.IdentityVerification.user_id == user_id))
+        identity = result.scalar_one_or_none()
 
         data_dict = data.model_dump()
 
@@ -250,19 +256,21 @@ class KycService:
             db.add(identity)
             logger.info(f'Created new identity verification for user {user_id}')
 
-        db.commit()
-        db.refresh(identity)
+        await db.commit()
+        await db.refresh(identity)
         return identity
 
     @staticmethod
-    def get_identity(db: Session, user_id: int):
+    async def get_identity(db: AsyncSession, user_id: int):
         logger.info(f'Fetching identity verification for user {user_id}')
-        return db.query(db_models.IdentityVerification).filter_by(user_id=user_id).first()
+        result = await db.execute(select(db_models.IdentityVerification).where(db_models.IdentityVerification.user_id == user_id))
+        return result.scalar_one_or_none()
 
     @staticmethod
-    def create_or_update_business(db: Session, user_id: int, data: kyc.BusinessVerification):
+    async def create_or_update_business(db: AsyncSession, user_id: int, data: kyc.BusinessVerification):
         logger.info(f'Creating or updating business verification for user {user_id}')
-        business = db.query(db_models.BusinessVerification).filter_by(user_id=user_id).first()
+        result = await db.execute(select(db_models.BusinessVerification).where(db_models.BusinessVerification.user_id == user_id))
+        business = result.scalar_one_or_none()
 
         data_dict = data.model_dump()
         if 'website' in data_dict and data_dict['website']:
@@ -277,11 +285,12 @@ class KycService:
             db.add(business)
             logger.info(f'Created new business verification for user {user_id}')
 
-        db.commit()
-        db.refresh(business)
+        await db.commit()
+        await db.refresh(business)
         return business
 
     @staticmethod
-    def get_business(db: Session, user_id: int):
+    async def get_business(db: AsyncSession, user_id: int):
         logger.info(f'Fetching business verification for user {user_id}')
-        return db.query(db_models.BusinessVerification).filter_by(user_id=user_id).first()
+        result = await db.execute(select(db_models.BusinessVerification).where(db_models.BusinessVerification.user_id == user_id))
+        return result.scalar_one_or_none()

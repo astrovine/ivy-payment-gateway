@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from authlib.integrations.starlette_client import OAuth
 
 from ..models import db_models
@@ -13,7 +14,6 @@ from ..services.email_service import EmailService
 from ..services.user_service import UserService
 from ..utilities import Oauth2
 from ..utilities import Oauth2 as au
-from ..utilities import db_con
 from ..utilities.config import settings
 from ..utilities.db_con import get_db
 from ..utilities.exceptions import (
@@ -27,6 +27,8 @@ from ..utilities.exceptions import (
 )
 from ..utilities.logger import log_user_action, log_security_event, setup_logger
 from ..utilities.utils import verify_password
+from ..utilities.rate_limiter import rate_limit, login_rate_limit_key, register_rate_limit_key, forgot_password_rate_limit_key
+from ..utilities.password_validator import validate_password_strength, PasswordValidationError
 
 logger = setup_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Authentication"])
@@ -57,13 +59,23 @@ oauth.register(
     client_kwargs={'scope': 'user:email read:user'},
 )
 
+
 @router.post("/auth/register", response_model=user_schema.UserRes, status_code=status.HTTP_201_CREATED)
-async def create_account(user_data: user_schema.UserCreate, request: Request, db: Session = Depends(get_db)):
+@rate_limit(max_requests=5, window_seconds=300, key_func=register_rate_limit_key)
+async def create_account(user_data: user_schema.UserCreate, request: Request, db: AsyncSession = Depends(get_db)):
     try:
         ip_address = request.client.host if request.client else "unknown"
         logger.info(f"New user registration attempt for email: {user_data.email}")
-        new_user = UserService.create_user(db=db, user_data=user_data)
-        log_user_action(
+        
+        is_valid, errors = validate_password_strength(user_data.password)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"password_errors": errors}
+            )
+        
+        new_user = await UserService.create_user(db=db, user_data=user_data)
+        await log_user_action(
             db=db,
             user_id=new_user.id,
             action="USER_REGISTERED",
@@ -73,26 +85,35 @@ async def create_account(user_data: user_schema.UserCreate, request: Request, db
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"email": new_user.email, "country": user_data.country}
         )
-        db.commit()
+        await db.commit()
         logger.info(f"User {new_user.id} registered successfully: {new_user.email}")
         return new_user
     except DuplicateEmailError:
-        db.rollback()
+        await db.rollback()
         logger.warning(f"Registration failed: Email already exists - {user_data.email}")
         log_security_event("DUPLICATE_EMAIL_REGISTRATION", {"email": user_data.email})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
     except UserCreationError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"User creation error: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/auth/login", response_model=token.LoginResponse)
+@rate_limit(max_requests=5, window_seconds=60, block_duration_seconds=300, key_func=login_rate_limit_key)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None,
-                db: Session = Depends(db_con.get_db)):
+                db: AsyncSession = Depends(get_db)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Login attempt for email: {form_data.username} from IP: {ip_address}")
-    user = db.query(db_models.User).filter_by(email=form_data.username).first()
+
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(db_models.User)
+        .options(selectinload(db_models.User.merchant_info), selectinload(db_models.User.verified_info))
+        .where(db_models.User.email == form_data.username)
+    )
+    user = result.scalar_one_or_none()
+
     if not user:
         logger.warning(f"Failed login attempt - User not found for email: {form_data.username} from IP: {ip_address}")
         log_security_event(
@@ -101,10 +122,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
             severity="WARNING"
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
     logger.info(f"User found: {user.id}, attempting password verification")
     logger.info(f"Password hash starts with: {user.password[:20] if user.password else 'None'}...")
     password_valid = verify_password(form_data.password, user.password)
     logger.info(f"Password verification result: {password_valid}")
+
     if not password_valid:
         logger.warning(f"Failed login attempt - Invalid password for email: {form_data.username} from IP: {ip_address}")
         log_security_event(
@@ -113,10 +136,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
             severity="WARNING"
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
     access_token = Oauth2.create_access_token(data={"sub": str(user.id)})
-    refresh_token = au.create_refresh_token(data={"sub": str(user.id)}, db=db)
-    merchant_id = user.merchant_info.merchant_id if hasattr(user, 'merchant_info') and user.merchant_info else None
-    log_user_action(
+    refresh_token = await au.create_refresh_token(data={"sub": str(user.id)}, db=db)
+    merchant_id = user.merchant_info.merchant_id if user.merchant_info else None
+
+    await log_user_action(
         db=db,
         user_id=user.id,
         action="USER_LOGIN",
@@ -127,8 +152,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
         user_agent=request.headers.get("user-agent") if request else None,
         extra_data={"email": user.email, "login_time": datetime.now(timezone.utc).isoformat()}
     )
-    db.commit()
+    await db.commit()
     logger.info(f"User {user.id} ({user.email}) logged in successfully from IP: {ip_address}")
+
     is_verified = user.verified_info is not None
     has_merchant = user.merchant_info is not None
     if not is_verified:
@@ -137,6 +163,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Reque
         onboarding_stage = "verified"
     else:
         onboarding_stage = "active"
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -169,7 +196,7 @@ async def get_current_user_details(current_user: db_models.User = Depends(au.get
 async def refresh_access_token(
         request_body: token.RefreshTokenRequest,
         request: Request,
-        db: Session = Depends(db_con.get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -181,7 +208,10 @@ async def refresh_access_token(
         refresh_token = request_body.refresh_token
         logger.info(f"Refresh token request from IP: {ip_address}")
         payload = Oauth2.verify_refresh_token(refresh_token, credentials_exception)
-        stored_token = db.query(db_models.RefreshToken).filter_by(refresh_token=refresh_token).first()
+
+        result = await db.execute(select(db_models.RefreshToken).where(db_models.RefreshToken.refresh_token == refresh_token))
+        stored_token = result.scalar_one_or_none()
+
         if not stored_token or stored_token.revoked:
             logger.warning(f"Attempted use of invalid/revoked refresh token from IP: {ip_address}")
             log_security_event(
@@ -207,11 +237,11 @@ async def refresh_access_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         stored_token.revoked = True
-        db.commit()
+        await db.commit()
         user_id = payload.id
         new_access_token = Oauth2.create_access_token(data={"sub": user_id})
-        new_refresh_token = Oauth2.create_refresh_token(data={"sub": user_id}, db=db)
-        log_user_action(
+        new_refresh_token = await Oauth2.create_refresh_token(data={"sub": user_id}, db=db)
+        await log_user_action(
             db=db,
             user_id=int(user_id),
             action="TOKEN_REFRESHED",
@@ -221,7 +251,7 @@ async def refresh_access_token(
             user_agent=request.headers.get("user-agent") if request else None,
             extra_data={"refreshed_at": datetime.now(timezone.utc).isoformat()}
         )
-        db.commit()
+        await db.commit()
         logger.info(f"Access token refreshed successfully for user {user_id}")
         return {
             "access_token": new_access_token,
@@ -229,27 +259,27 @@ async def refresh_access_token(
             "token_type": "bearer"
         }
     except HTTPException:
-        db.rollback()
+        await db.rollback()
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error in refresh_access_token: {e}", exc_info=True)
         log_security_event("REFRESH_TOKEN_ERROR", {"error": str(e), "ip_address": ip_address}, severity="ERROR")
         raise credentials_exception
 
 
 @router.post('/auth/verify', response_model=user_schema.UserVerifiedInfoRes, status_code=status.HTTP_201_CREATED)
-async def verify_user_account(verification_data: user_schema.UserVer, request: Request, db: Session = Depends(get_db),
+async def verify_user_account(verification_data: user_schema.UserVer, request: Request, db: AsyncSession = Depends(get_db),
                               current_user: db_models.User = Depends(au.get_current_user)):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"User {current_user.id} ({current_user.email}) initiated account verification from {ip_address}")
     try:
-        verified_user = UserService.verify_user_account(
+        verified_user = await UserService.verify_user_account(
             db=db,
             current_user=current_user,
             verification_data=verification_data
         )
-        log_user_action(
+        await log_user_action(
             db=db,
             user_id=current_user.id,
             action="USER_ACCOUNT_VERIFIED",
@@ -263,11 +293,11 @@ async def verify_user_account(verification_data: user_schema.UserVer, request: R
                 "verified_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        db.commit()
+        await db.commit()
         logger.info(f"User {current_user.id} account verified successfully")
         return verified_user
     except UserAlreadyVerifiedError:
-        db.rollback()
+        await db.rollback()
         logger.warning(f"User {current_user.id} attempted to verify already verified account from {ip_address}")
         log_security_event(
             "DUPLICATE_VERIFICATION_ATTEMPT",
@@ -276,7 +306,7 @@ async def verify_user_account(verification_data: user_schema.UserVer, request: R
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already verified")
     except VerificationError as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Verification error for user {current_user.id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -289,12 +319,12 @@ async def verify_user_account(verification_data: user_schema.UserVer, request: R
 async def forgot_password(
         data: password_schema.ForgotPasswordRequest,
         request: Request,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Password reset requested for email: {data.email} from IP: {ip_address}")
     try:
-        result = UserService.request_password_reset(db=db, email=data.email)
+        result = await UserService.request_password_reset(db=db, email=data.email)
         if result:
             reset_token, user = result
             email_sent = EmailService.send_password_reset_email(
@@ -304,7 +334,7 @@ async def forgot_password(
             )
             if email_sent:
                 logger.info(f"Password reset email sent successfully to {user.email}")
-                log_user_action(
+                await log_user_action(
                     db=db,
                     user_id=user.id,
                     action="PASSWORD_RESET_REQUESTED",
@@ -314,7 +344,7 @@ async def forgot_password(
                     user_agent=request.headers.get("user-agent") if request else None,
                     extra_data={"email": user.email}
                 )
-                db.commit()
+                await db.commit()
             else:
                 logger.error(f"Failed to send password reset email to {user.email}")
         return password_schema.ForgotPasswordResponse(
@@ -335,12 +365,12 @@ async def forgot_password(
 async def reset_password(
         data: password_schema.ResetPasswordRequest,
         request: Request,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     ip_address = request.client.host if request and request.client else "unknown"
     logger.info(f"Password reset attempt from IP: {ip_address}")
     try:
-        UserService.reset_password(
+        await UserService.reset_password(
             db=db,
             token=data.token,
             new_password=data.new_password,
@@ -400,23 +430,23 @@ async def google_login(request: Request):
 @router.get("/auth/google/callback")
 async def google_callback(
         request: Request,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     try:
-        token = await oauth.google.authorize_access_token(request)
+        token_resp = await oauth.google.authorize_access_token(request)
     except Exception as e:
         logger.error(f"Google OAuth Error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Failed to get token from Google")
-    user_info = await oauth.google.get('userinfo', token=token)
+    user_info = await oauth.google.get('userinfo', token=token_resp)
     user_info_data = user_info.json()
     email = user_info_data.get("email")
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email not found in Google response")
-    user = UserService.find_or_create_by_oauth(db, user_info_data)
+    user = await UserService.find_or_create_by_oauth(db, user_info_data)
     if not user:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create user")
     access_token = Oauth2.create_access_token(data={"sub": str(user.id)})
-    refresh_token = au.create_refresh_token(data={"sub": str(user.id)}, db=db)
+    refresh_token = await au.create_refresh_token(data={"sub": str(user.id)}, db=db)
     return RedirectResponse(
         url=f"http://ivypayments.ddns.net:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
     )
@@ -431,21 +461,21 @@ async def github_login(request: Request):
 @router.get("/auth/github/callback")
 async def github_callback(
         request: Request,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     try:
-        token = await oauth.github.authorize_access_token(request)
+        token_resp = await oauth.github.authorize_access_token(request)
     except Exception as e:
         logger.error(f"GitHub OAuth Error: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Failed to get token from GitHub")
 
-    user_info = await oauth.github.get('user', token=token)
+    user_info = await oauth.github.get('user', token=token_resp)
     user_info_data = user_info.json()
     email = user_info_data.get("email")
 
     if not email:
         try:
-            emails = await oauth.github.get('user/emails', token=token)
+            emails = await oauth.github.get('user/emails', token=token_resp)
             email_data = emails.json()
             primary_email = next((e['email'] for e in email_data if e['primary']), None)
             if not primary_email:
@@ -460,12 +490,12 @@ async def github_callback(
     if not user_info_data.get("name"):
         user_info_data["name"] = user_info_data.get("login", "GitHub User")
 
-    user = UserService.find_or_create_by_oauth(db, user_info_data)
+    user = await UserService.find_or_create_by_oauth(db, user_info_data)
     if not user:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create user")
 
     access_token = Oauth2.create_access_token(data={"sub": str(user.id)})
-    refresh_token = au.create_refresh_token(data={"sub": str(user.id)}, db=db)
+    refresh_token = await au.create_refresh_token(data={"sub": str(user.id)}, db=db)
     return RedirectResponse(
         url=f"http://ivypayments.ddns.net:5173/auth/callback?access_token={access_token}&refresh_token={refresh_token}"
     )

@@ -1,5 +1,6 @@
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from ..models import db_models
@@ -16,17 +17,18 @@ logger = setup_logger("payment_gateway.services.verification_service")
 
 class VerificationService:
     @staticmethod
-    def submit_business_verification(
-        db: Session,
+    async def submit_business_verification(
+        db: AsyncSession,
         current_user: db_models.User,
         verification_data: user_schema.UserVer
     ) -> db_models.UserVerified:
         try:
             logger.info(f"Submitting business verification for user: {current_user.id} ({current_user.email})")
 
-            existing = db.query(db_models.UserVerified).filter(
-                db_models.UserVerified.user_id == current_user.id
-            ).first()
+            result = await db.execute(
+                select(db_models.UserVerified).where(db_models.UserVerified.user_id == current_user.id)
+            )
+            existing = result.scalar_one_or_none()
 
             if existing:
                 logger.warning(f"User {current_user.id} already has business verification submitted")
@@ -39,16 +41,17 @@ class VerificationService:
 
             new_verification = db_models.UserVerified(**ver_data)
             db.add(new_verification)
-            db.flush()
-            db.refresh(new_verification)
+            await db.flush()
+            await db.refresh(new_verification)
 
-            merchant_account = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == current_user.id
-            ).first()
+            merchant_result = await db.execute(
+                select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == current_user.id)
+            )
+            merchant_account = merchant_result.scalar_one_or_none()
 
             if merchant_account:
                 merchant_account.verification_status = db_models.VerificationStatus.pending
-                db.flush()
+                await db.flush()
                 logger.info(f"Updated merchant account {merchant_account.merchant_id} verification_status to pending")
 
             logger.info(f"Business verification submitted successfully for user {current_user.id} - {verification_data.business_name}")
@@ -57,33 +60,35 @@ class VerificationService:
         except UserAlreadyVerifiedError:
             raise
         except IntegrityError as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Integrity error during business verification for user {current_user.id}: {str(e)}")
             raise VerificationError("Business email may already be in use")
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Unexpected error during business verification for user {current_user.id}: {str(e)}", exc_info=True)
             raise VerificationError(str(e))
 
     @staticmethod
-    def get_business_verification_status(
-        db: Session,
+    async def get_business_verification_status(
+        db: AsyncSession,
         current_user: db_models.User
     ) -> Optional[dict]:
         try:
             logger.info(f"Fetching business verification status for user: {current_user.id}")
 
-            verification = db.query(db_models.UserVerified).filter(
-                db_models.UserVerified.user_id == current_user.id
-            ).first()
+            result = await db.execute(
+                select(db_models.UserVerified).where(db_models.UserVerified.user_id == current_user.id)
+            )
+            verification = result.scalar_one_or_none()
 
             if not verification:
                 logger.info(f"No business verification found for user {current_user.id}")
                 return None
 
-            merchant_account = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == current_user.id
-            ).first()
+            merchant_result = await db.execute(
+                select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == current_user.id)
+            )
+            merchant_account = merchant_result.scalar_one_or_none()
 
             verification_status = "unverified"
             if merchant_account and merchant_account.verification_status:
@@ -118,18 +123,18 @@ class VerificationService:
             raise VerificationError(f"Failed to retrieve verification status: {str(e)}")
 
     @staticmethod
-    def update_business_information(
-        db: Session,
+    async def update_business_information(
+        db: AsyncSession,
         current_user: db_models.User,
         update_data: user_schema.UserUpdateVer
     ) -> dict:
         try:
             logger.info(f"Updating business information for user: {current_user.id}")
 
-            verification_query = db.query(db_models.UserVerified).filter(
-                db_models.UserVerified.user_id == current_user.id
+            result = await db.execute(
+                select(db_models.UserVerified).where(db_models.UserVerified.user_id == current_user.id)
             )
-            verification = verification_query.first()
+            verification = result.scalar_one_or_none()
 
             if not verification:
                 logger.warning(f"No business verification found for user {current_user.id}")
@@ -141,16 +146,18 @@ class VerificationService:
                 update_dict['business_website'] = str(update_dict['business_website'])
 
             if update_dict:
-                verification_query.update(update_dict, synchronize_session=False)
-                db.flush()
-                db.refresh(verification)
+                for key, value in update_dict.items():
+                    setattr(verification, key, value)
+                await db.flush()
+                await db.refresh(verification)
                 logger.info(f"Business information updated successfully for user {current_user.id}")
             else:
                 logger.info(f"No fields to update for user {current_user.id}")
 
-            merchant_account = db.query(db_models.MerchantAccount).filter(
-                db_models.MerchantAccount.user_id == current_user.id
-            ).first()
+            merchant_result = await db.execute(
+                select(db_models.MerchantAccount).where(db_models.MerchantAccount.user_id == current_user.id)
+            )
+            merchant_account = merchant_result.scalar_one_or_none()
 
             verification_status = "unverified"
             if merchant_account and merchant_account.verification_status:
@@ -181,11 +188,10 @@ class VerificationService:
         except UserNotFoundError:
             raise
         except IntegrityError as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Integrity error updating business info for user {current_user.id}: {str(e)}")
             raise VerificationError("Business email may already be in use")
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"Unexpected error updating business info for user {current_user.id}: {str(e)}", exc_info=True)
             raise VerificationError(f"Failed to update business information: {str(e)}")
-
